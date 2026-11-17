@@ -56,7 +56,7 @@ test("the notes example answers over HTTP, MCP, the CLI and the browser client",
 
   try {
     // HTTP
-    const catalog = await (await fetch(`${url}/api/actions`)).json();
+    const catalog = (await (await fetch(`${url}/api/actions`)).json()) as { actions: { name: string }[] };
     assert.deepEqual(
       catalog.actions.map((a: { name: string }) => a.name),
       ["note.add", "note.list"],
