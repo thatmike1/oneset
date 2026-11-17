@@ -1,0 +1,9 @@
+{
+  "name": "oneset-consumer",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "oneset": "file:./oneset.tgz",
+    "zod": "4.6.7"
+  }
+}
