@@ -28,12 +28,15 @@ export interface McpOptions<Def = AnyAction, Caller = any> extends Omit<DoorOpti
 }
 
 /** answers one MCP request for a caller the app already resolved; `body` when the app read it already */
-export type McpHandler<Caller = any> = (
+export type McpHandler<Caller = any> = ((
   req: IncomingMessage,
   res: ServerResponse,
   caller: Caller,
   body?: unknown,
-) => Promise<void>;
+) => Promise<void>) & {
+  /** the door underneath, for its catalog (the skill lists its tools) */
+  door: Door<any, Caller>;
+};
 
 type Id = string | number;
 interface Message {
@@ -185,7 +188,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     }
   }
 
-  return async function handle(req, res, caller, body) {
+  const handle = async (req: IncomingMessage, res: ServerResponse, caller: unknown, body?: unknown) => {
     try {
       if (req.method !== "POST") {
         throw new RpcError(405, -32000, "Method not allowed.", { allow: "POST" });
@@ -254,4 +257,5 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       sendRpc(res, 500, { jsonrpc: "2.0", error: { code: -32603, message: "Internal error" }, id: null });
     }
   };
+  return Object.assign(handle, { door: tools });
 }

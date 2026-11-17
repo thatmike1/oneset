@@ -3,10 +3,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AnyAction, DoorOptions, Registry } from "../core.ts";
 import { ActionError } from "../errors.ts";
+import { type AppInfo, browserSource, cliSource, setupPage, skillMarkdown, slugOf } from "./files.ts";
 import { createGuard, type GuardOptions, isLoopback } from "./guard.ts";
 import { mcp } from "./mcp.ts";
-import { sendError, sendJson } from "./respond.ts";
+import { sendError, sendJson, sendText } from "./respond.ts";
+import { openStream } from "./stream.ts";
 
+export { envPrefixOf, slugOf } from "./files.ts";
 export { createGuard, type Guard, type GuardOptions, isLoopback } from "./guard.ts";
 export {
   LATEST_PROTOCOL_VERSION,
@@ -56,11 +59,7 @@ export type DoorsOptions<Def = AnyAction, Caller = any> = BaseOptions<Def, Calle
 
 export type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
-interface Route {
-  kind: "catalog" | "run" | "mcp";
-  methods: string[];
-  action?: string;
-}
+type RouteKind = "catalog" | "run" | "mcp" | "stream" | "cli" | "skill" | "browser" | "setup";
 
 /**
  * mounts every door on the app's server: `if (await handle(req, res)) return;` answers the
@@ -71,6 +70,8 @@ export function doors<R extends Registry<any, any, any, any, any>>(
   options: DoorsOptions<DefOf<R>, CallerOf<R>>,
 ): Handler {
   const opts = options as BaseOptions<AnyAction, unknown> & { caller?: ResolveCaller<unknown> };
+  if (!opts || typeof opts.name !== "string") throw new Error("oneset: doors() needs the app's name");
+  const slug = slugOf(opts.name);
   const base = opts.base ?? "";
   if (base !== "" && !/^(\/[^/]+)+$/.test(base)) {
     throw new Error(`oneset: base must start with a slash and not end with one, like "/kit" (got "${base}")`);
@@ -94,12 +95,40 @@ export function doors<R extends Registry<any, any, any, any, any>>(
   const resolve = async (req: IncomingMessage, door: DoorKind) =>
     opts.caller ? opts.caller(req, door) : undefined;
 
-  function route(path: string): Route | null {
-    if (path === "/api/actions") return { kind: "catalog", methods: ["GET"] };
+  /** the app as the served files describe it, at the address this request came to */
+  function appInfo(req: IncomingMessage): AppInfo {
+    const origin = (opts.url ?? `http://${req.headers.host}`).replace(/\/$/, "");
+    const info: AppInfo = { name: opts.name, slug, url: `${origin}${base}`, signIn: Boolean(opts.caller) };
+    if (opts.instructions) info.instructions = opts.instructions;
+    if (opts.when) info.when = opts.when;
+    return info;
+  }
+
+  const routes: Record<string, { kind: RouteKind; methods: string[] }> = {
+    "/api/actions": { kind: "catalog", methods: ["GET"] },
     // the MCP handler answers every method itself (GET and DELETE get its 405)
-    if (path === "/mcp") return { kind: "mcp", methods: [] };
+    "/mcp": { kind: "mcp", methods: [] },
+    [`/cli/${slug}.mjs`]: { kind: "cli", methods: ["GET"] },
+    "/skill/SKILL.md": { kind: "skill", methods: ["GET"] },
+    "/actions.js": { kind: "browser", methods: ["GET"] },
+    "/setup": { kind: "setup", methods: ["GET"] },
+  };
+
+  function route(
+    path: string,
+    method: string,
+  ): { kind: RouteKind; methods: string[]; action?: string } | null {
+    const fixed = routes[path];
+    if (fixed) return fixed;
+    // GET is the stream; POST runs an action that happens to be called "stream"
+    if (path === "/api/actions/stream" && method === "GET") return { kind: "stream", methods: ["GET"] };
     const run = /^\/api\/actions\/([^/]+)$/.exec(path);
-    if (run) return { kind: "run", methods: ["POST"], action: decodeURIComponent(run[1] ?? "") };
+    if (run)
+      return {
+        kind: "run",
+        methods: path === "/api/actions/stream" ? ["GET", "POST"] : ["POST"],
+        action: decodeURIComponent(run[1] ?? ""),
+      };
     return null;
   }
 
@@ -110,28 +139,59 @@ export function doors<R extends Registry<any, any, any, any, any>>(
       if (path !== base && !path.startsWith(`${base}/`)) return false;
       path = path.slice(base.length) || "/";
     }
-    const r = route(path);
-    if (!r) return false;
     const method = req.method ?? "GET";
+    const r = route(path, method);
+    if (!r) return false;
     try {
       guard.check(req);
       if (r.kind === "mcp") {
         await mcpHandle(req, res, await resolve(req, "mcp"));
         return true;
       }
-      if (!r.methods.includes(method)) {
+      if (!r.methods.includes(method) || (r.kind === "run" && method !== "POST")) {
         throw new ActionError(405, "method_not_allowed", `${method} is not allowed here`, {
           headers: { allow: r.methods.join(", ") },
         });
       }
-      if (r.kind === "catalog") {
-        const caller = await resolve(req, "http");
-        sendJson(res, 200, { app: opts.name, actions: http.catalog(caller) });
-      } else {
-        const input = await guard.readJson(req);
-        const caller = await resolve(req, "http");
-        const result = await http.run(r.action ?? "", input, caller);
-        sendJson(res, 200, { result });
+      switch (r.kind) {
+        case "catalog": {
+          const caller = await resolve(req, "http");
+          sendJson(res, 200, { app: opts.name, actions: http.catalog(caller) });
+          break;
+        }
+        case "run": {
+          const input = await guard.readJson(req);
+          const caller = await resolve(req, "http");
+          const result = await http.run(r.action ?? "", input, caller);
+          sendJson(res, 200, { result });
+          break;
+        }
+        case "stream":
+          await resolve(req, "stream");
+          openStream(registry, req, res);
+          break;
+        case "skill": {
+          const caller = await resolve(req, "skill");
+          sendText(
+            res,
+            200,
+            "text/markdown; charset=utf-8",
+            skillMarkdown(appInfo(req), mcpHandle.door.catalog(caller)),
+          );
+          break;
+        }
+        case "cli":
+          sendText(res, 200, "text/javascript; charset=utf-8", cliSource(appInfo(req)));
+          break;
+        case "browser":
+          sendText(res, 200, "text/javascript; charset=utf-8", browserSource(appInfo(req)));
+          break;
+        case "setup":
+          sendText(res, 200, "text/html; charset=utf-8", setupPage(appInfo(req)), {
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "same-origin",
+          });
+          break;
       }
     } catch (err) {
       sendError(res, err);
