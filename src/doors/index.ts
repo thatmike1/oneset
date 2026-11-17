@@ -4,9 +4,18 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AnyAction, DoorOptions, Registry } from "../core.ts";
 import { ActionError } from "../errors.ts";
 import { createGuard, type GuardOptions, isLoopback } from "./guard.ts";
+import { mcp } from "./mcp.ts";
 import { sendError, sendJson } from "./respond.ts";
 
 export { createGuard, type Guard, type GuardOptions, isLoopback } from "./guard.ts";
+export {
+  LATEST_PROTOCOL_VERSION,
+  type McpHandler,
+  type McpOptions,
+  mcp,
+  mcpTools,
+  PROTOCOL_VERSIONS,
+} from "./mcp.ts";
 export { errorBody } from "./respond.ts";
 
 /** which of the kit's doors a caller is being resolved for */
@@ -35,6 +44,8 @@ interface BaseOptions<Def, Caller> extends GuardOptions {
   openWithoutSignIn?: boolean;
   /** options for the HTTP door: `list`, `describe`, `render`, `draft` */
   http?: DoorSettings<Def, Caller>;
+  /** options for the MCP door: `list`, `describe`, `render`, `draft` (default draft-7), `version` */
+  mcp?: DoorSettings<Def, Caller> & { version?: string };
 }
 
 /** resolves the caller for a request, or throws (an ActionError with headers for a challenge) */
@@ -46,7 +57,7 @@ export type DoorsOptions<Def = AnyAction, Caller = any> = BaseOptions<Def, Calle
 export type Handler = (req: IncomingMessage, res: ServerResponse) => Promise<boolean>;
 
 interface Route {
-  kind: "catalog" | "run";
+  kind: "catalog" | "run" | "mcp";
   methods: string[];
   action?: string;
 }
@@ -74,11 +85,19 @@ export function doors<R extends Registry<any, any, any, any, any>>(
   const guard = createGuard(opts);
   const registry = reg as Registry;
   const http = registry.door({ ...(opts.http as DoorSettings), name: "http" });
+  const mcpHandle = mcp(registry, {
+    ...(opts.mcp as DoorSettings),
+    name: opts.name,
+    ...(opts.instructions ? { instructions: opts.instructions } : {}),
+    ...(opts.maxBody ? { maxBody: opts.maxBody } : {}),
+  });
   const resolve = async (req: IncomingMessage, door: DoorKind) =>
     opts.caller ? opts.caller(req, door) : undefined;
 
   function route(path: string): Route | null {
     if (path === "/api/actions") return { kind: "catalog", methods: ["GET"] };
+    // the MCP handler answers every method itself (GET and DELETE get its 405)
+    if (path === "/mcp") return { kind: "mcp", methods: [] };
     const run = /^\/api\/actions\/([^/]+)$/.exec(path);
     if (run) return { kind: "run", methods: ["POST"], action: decodeURIComponent(run[1] ?? "") };
     return null;
@@ -96,6 +115,10 @@ export function doors<R extends Registry<any, any, any, any, any>>(
     const method = req.method ?? "GET";
     try {
       guard.check(req);
+      if (r.kind === "mcp") {
+        await mcpHandle(req, res, await resolve(req, "mcp"));
+        return true;
+      }
       if (!r.methods.includes(method)) {
         throw new ActionError(405, "method_not_allowed", `${method} is not allowed here`, {
           headers: { allow: r.methods.join(", ") },
