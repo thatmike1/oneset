@@ -30,6 +30,17 @@ try {
     console.error(`pack check failed: runtime dependencies ${Object.keys(pkg.dependencies).join(", ")}`);
     process.exit(1);
   }
+  // the official MCP SDK is a dev dependency only: nothing built may import it
+  const sdk = execFileSync("sh", [
+    "-c",
+    `tar -xzOf ${tarball} --wildcards 'package/dist/*' | grep -c modelcontextprotocol || true`,
+  ])
+    .toString()
+    .trim();
+  if (sdk !== "0") {
+    console.error("pack check failed: the built package mentions @modelcontextprotocol");
+    process.exit(1);
+  }
   console.log(
     `pack check ok: ${files.length} files, peer deps ${Object.keys(pkg.peerDependencies ?? {}).join(", ")}`,
   );
