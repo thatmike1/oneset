@@ -86,6 +86,33 @@ describe("the http door", () => {
     }
   });
 
+  test("any thrown error with a status and code is rendered by them, ActionError or not", async () => {
+    class HttpError extends Error {
+      status = 410;
+      code = "link_gone";
+    }
+    const reg = createRegistry([
+      defineAction({
+        name: "x.gone",
+        area: "x",
+        summary: "gone",
+        mutates: false,
+        input: z.object({}),
+        run: () => {
+          throw new HttpError("this link was used already");
+        },
+      }),
+    ]);
+    const other = await serve(doors(reg, { name: "x" }));
+    try {
+      const res = await raw(other.port, { path: "/api/actions/x.gone", ...json({}) });
+      assert.equal(res.status, 410);
+      assert.deepEqual(res.json(), { error: { code: "link_gone", message: "this link was used already" } });
+    } finally {
+      await other.close();
+    }
+  });
+
   test("a wrong method on a kit path is 405, and other paths fall through to the app", async () => {
     const res = await raw(app.port, { method: "DELETE", path: "/api/actions" });
     assert.equal(res.status, 405);

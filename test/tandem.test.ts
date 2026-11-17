@@ -70,6 +70,16 @@ describe("space", () => {
     assert.deepEqual(keys("people.whoami"), []);
   });
 
+  test("the catalog and MCP schemas show the field the schema hook adds", () => {
+    const props = (door: ReturnType<typeof app.reg.door>, name: string) =>
+      Object.keys(door.catalog(mike).find((e) => e.name === name)?.inputSchema.properties ?? {});
+    for (const draft of ["draft-2020-12", "draft-7"] as const) {
+      const door = app.reg.door({ name: draft, draft });
+      assert.deepEqual(props(door, "item.create"), ["title", "space"]);
+      assert.deepEqual(props(door, "people.whoami"), []);
+    }
+  });
+
   test("a space the caller is not in is the app's own error", () => {
     rejects(() => app.reg.run("item.list", { space: "work" }, jindra), "no_space");
   });

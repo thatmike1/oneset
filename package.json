@@ -28,7 +28,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check": "biome check .",
     "format": "biome check --write .",
-    "test": "node --test --test-reporter=spec --test-concurrency=1 'test/**/*.test.ts'",
+    "test": "node --test --test-reporter=spec --test-concurrency=1 --test-timeout=60000 'test/**/*.test.ts'",
     "pack:check": "node scripts/pack-check.mjs",
     "gate": "pnpm check && pnpm typecheck && pnpm build && pnpm test && pnpm pack:check"
   },
