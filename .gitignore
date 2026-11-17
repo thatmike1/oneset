@@ -1,0 +1,5 @@
+node_modules
+dist
+*.tgz
+test/consumer/node_modules
+test/consumer/oneset.tgz
