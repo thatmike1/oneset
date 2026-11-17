@@ -35,5 +35,5 @@ test("the packed package type-checks in a consumer project and runs from plain J
     const e = err as { stdout?: string; stderr?: string };
     assert.fail(`the consumer did not compile:\n${e.stdout ?? ""}${e.stderr ?? ""}`);
   }
-  assert.match(sh("node", ["run.mjs"], consumer), /^ok /);
+  assert.equal(sh("node", ["run.mjs"], consumer), "ok\n");
 });
