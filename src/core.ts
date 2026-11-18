@@ -148,8 +148,11 @@ export interface Registry<
     info?: Partial<RunInfo>,
   ): RunOutput<H, D, N>;
   door(options: DoorOptions<Def, Caller>): Door<Def, Caller>;
-  /** hears every successful outermost mutating run, async ones once they resolve */
-  onChange(listener: (change: Change) => void): () => void;
+  /**
+   * hears every successful outermost mutating run, async ones once they resolve. A listener that
+   * throws or rejects is logged and never breaks the run or the other listeners
+   */
+  onChange(listener: (change: Change) => unknown): () => void;
 }
 
 /** what a client needs: every action's input and its awaited output, by name */
@@ -203,13 +206,16 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
   };
   const problem = (p: KitProblem<AnyAction>): Error => (hooks.error ?? defaultProblem)(p);
 
-  const listeners = new Set<(change: Change) => void>();
+  const listeners = new Set<(change: Change) => unknown>();
   const emit = (change: Change): void => {
+    const failed = (err: unknown) => console.error("oneset: a change listener failed", err);
     for (const fn of listeners) {
       try {
-        fn(change);
+        // an async listener's rejection is caught too, without waiting for it
+        const out: unknown = fn(change);
+        if (isThenable(out)) Promise.resolve(out).catch(failed);
       } catch (err) {
-        console.error("oneset: a change listener failed", err);
+        failed(err);
       }
     }
   };

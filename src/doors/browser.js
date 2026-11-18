@@ -59,11 +59,14 @@ let source = null;
 let opened = false;
 
 function notify(change) {
+  const failed = (err) => console.error("onChange listener failed", err);
   for (const fn of listeners) {
     try {
-      fn(change);
+      // an async listener's rejection is caught too, without waiting for it
+      const out = fn(change);
+      if (out && typeof out.then === "function") Promise.resolve(out).catch(failed);
     } catch (err) {
-      console.error("onChange listener failed", err);
+      failed(err);
     }
   }
 }

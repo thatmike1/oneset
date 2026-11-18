@@ -252,6 +252,42 @@ describe("the browser client", () => {
   });
 });
 
+describe("the browser client's listeners", () => {
+  test("an async listener that rejects is caught, and the later listeners still hear", async () => {
+    const reg = notesRegistry();
+    const app = await serve(doors(reg, { name: "notes" }));
+    const file = join(dir, "actions-listeners.mjs");
+    writeFileSync(file, (await raw(app.port, { path: "/actions.js" })).text);
+    (globalThis as { EventSource?: unknown }).EventSource = FetchEventSource;
+    const client: { onChange(fn: (change: unknown) => unknown): () => void } = await import(file);
+    const heard: unknown[] = [];
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => unhandled.push(err);
+    process.on("unhandledRejection", onUnhandled);
+    const original = console.error;
+    console.error = () => {};
+    const stopFailing = client.onChange(async () => {
+      throw new Error("async listener broke");
+    });
+    const stop = client.onChange((change) => heard.push(change));
+    try {
+      await new Promise((r) => setTimeout(r, 100));
+      reg.run("note.add", { text: "from an agent" }, undefined, { door: "mcp" });
+      for (let i = 0; i < 100 && heard.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      stopFailing();
+      stop();
+      console.error = original;
+      process.off("unhandledRejection", onUnhandled);
+      await app.close();
+    }
+    assert.deepEqual(heard, [{ action: "note.add", door: "mcp" }]);
+    assert.deepEqual(unhandled, []);
+  });
+});
+
 describe("the setup page", () => {
   test("gives the MCP line, the JSON config, the CLI line and the skill line, escaped", async () => {
     const app = await serve(doors(notesRegistry(), { name: "notes <&>" }));

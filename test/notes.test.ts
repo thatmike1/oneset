@@ -329,6 +329,33 @@ describe("change listeners", () => {
     assert.equal(errors.length, 2);
   });
 
+  test("an async listener that rejects is caught too, and the later listeners still hear", async () => {
+    const reg = notesRegistry();
+    const changes: unknown[] = [];
+    const errors: unknown[] = [];
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => unhandled.push(err);
+    process.on("unhandledRejection", onUnhandled);
+    const original = console.error;
+    console.error = (...args: unknown[]) => errors.push(args);
+    try {
+      reg.onChange(async () => {
+        throw new Error("async listener broke");
+      });
+      reg.onChange((c) => changes.push(c));
+      assert.deepEqual(reg.run("note.add", { text: "a" }, undefined), { id: 1, text: "a" });
+      // a rejection nobody handles is reported once the microtasks run out
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    } finally {
+      console.error = original;
+      process.off("unhandledRejection", onUnhandled);
+    }
+    assert.deepEqual(unhandled, []);
+    assert.equal(changes.length, 1);
+    assert.equal(errors.length, 1);
+  });
+
   test("an unsubscribed listener stops hearing", () => {
     const reg = notesRegistry();
     const changes: unknown[] = [];
