@@ -44,6 +44,7 @@ export function errorShape(err: unknown): RenderedError | null {
   if (typeof e.status !== "number" || typeof e.code !== "string") return null;
   const out: RenderedError = { status: e.status, code: e.code, message: String(e.message ?? e.code) };
   if (e.issues !== undefined) out.issues = e.issues;
+  // an explicit null is a body too; only a missing one means the default envelope
   if (e.body !== undefined) out.body = e.body;
   if (e.headers !== undefined) out.headers = e.headers;
   return out;

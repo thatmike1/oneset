@@ -140,6 +140,8 @@ describe("errors with extras, callers and door options", () => {
           if (input.v < 0) {
             throw new ActionError(409, "stale", "the tape moved", { body: { tape: [1, 2] } });
           }
+          // an explicit null body is a body, not "use the default envelope"
+          if (input.v === 0) throw new ActionError(409, "empty", "no tape", { body: null });
           return input.v;
         },
       }),
@@ -198,6 +200,16 @@ describe("errors with extras, callers and door options", () => {
     });
     assert.equal(res.status, 409);
     assert.deepEqual(res.json(), { tape: [1, 2] });
+  });
+
+  test("an explicit null body is sent as null", async () => {
+    const res = await raw(app.port, {
+      path: "/api/actions/tape.set",
+      ...json({ v: 0 }),
+      headers: { ...good, "content-type": "application/json" },
+    });
+    assert.equal(res.status, 409);
+    assert.equal(res.text, "null");
   });
 
   test("a refused caller's headers are sent", async () => {
