@@ -44,10 +44,35 @@ export interface ClientOptions {
 
 type AnyActions = Record<string, { input: any; output: any }>;
 
+/** a long action's job, as `act(name, input, { wait: false })` and `act("job.get", { id })` return it */
+export interface ClientJob {
+  id: string;
+  action: string;
+  state: "running" | "done" | "failed";
+  started: string;
+  finished?: string;
+  result?: unknown;
+  error?: { status: number; code: string; message: string; issues?: unknown; body?: unknown };
+}
+
 /** a client; type it with `createClient<ActionsOf<typeof reg>>()` */
 export interface Client<A extends AnyActions = AnyActions> {
-  /** runs an action and returns its result; a failure throws an ActionError with status and code */
-  act<N extends keyof A & string>(name: N, input?: A[N]["input"]): Promise<A[N]["output"]>;
+  /**
+   * runs an action and returns its result; a failure throws an ActionError with status and code.
+   * A long action's job is waited for; `{ wait: false }` returns the job instead
+   */
+  act<N extends keyof A & string>(
+    name: N,
+    input?: A[N]["input"],
+    options?: { wait?: true },
+  ): Promise<A[N]["output"]>;
+  act<N extends keyof A & string>(
+    name: N,
+    input: A[N]["input"],
+    options: { wait: false },
+  ): Promise<ClientJob>;
+  /** reads a long action's job, waiting up to `wait` seconds (default 30) for it to finish */
+  act(name: "job.get", input: { id: string; wait?: number }): Promise<ClientJob>;
   /** the actions this page may run, with their input schemas */
   actions(): Promise<ClientCatalogEntry[]>;
   /** calls `fn` after every change; returns a function that stops listening */

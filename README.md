@@ -73,21 +73,44 @@ From a checkout of this repo, run it with `pnpm build && node examples/notes/ser
 
 | Path | What |
 | --- | --- |
-| `GET /api/actions` | the catalog: `{ app, actions: [{ name, tool, area, summary, mutates, inputSchema }] }` |
-| `POST /api/actions/<name>` | a run: `{ result }`, or `{ error: { code, message, issues? } }` with the error's status |
+| `GET /api/actions` | the catalog: `{ app, actions: [{ name, tool, area, summary, mutates, long?, inputSchema }] }` |
+| `POST /api/actions/<name>` | a run: `{ result }`, or `{ error: { code, message, issues? } }` with the error's status; a long action answers 202 `{ job }` |
 | `POST /mcp` | the MCP door (stateless streamable HTTP, hand-written; the SDK is a dev dependency only) |
 | `GET /cli/<name>.mjs` | a zero-dependency CLI with the app's name and address filled in |
 | `GET /skill/SKILL.md` | a Claude Code skill listing the MCP tools |
 | `GET /actions.js` | the browser client: `act(name, input)`, `onChange(fn)`; also in the package as `oneset/client` |
-| `GET /api/actions/stream` | server-sent `change` events after every successful outermost mutating run |
+| `GET /api/actions/stream` | server-sent `change` events after every successful outermost mutating run (a long one's when its job finishes) |
 | `GET /setup` | the MCP, CLI and skill lines to paste once |
 
 A `base` option moves them all under a prefix.
 
+## Long actions
+
+An action that takes longer than a client waits (uncharted's `look.roll` is 70 to 75 s; an MCP client gives up at about 60) is marked `long: true`. Every door then answers at once with a job, and the kit adds one action, `job.get` (MCP `job_get`), that reads it. Start it, then read it.
+
+```js
+defineAction({ name: "look.roll", area: "looks", summary: "Roll six new looks", mutates: true, long: true, input, run });
+```
+
+The contract:
+
+- **What answers at once.** Allow, the door's list rule and input validation run before the job starts, so a refusal or bad input is the usual immediate error. Only `around` and the handler run in the job. A handler that throws, even before its first `await`, fails the job; it is not an immediate error.
+- **The start.** HTTP answers `202` with `{ job: { id, action, state, started } }`, the state `running` unless the handler finished synchronously. MCP answers a normal tool result whose text is that `{ job }` JSON followed by one line telling the agent to call `job_get` with the id. The catalog marks the action `long: true`, and the MCP tool description ends with "Long: answers at once with a job id; read the result with job_get."
+- **`job.get { id, wait? }`.** Answers `{ id, action, state, started, finished?, result?, error? }`, where `state` is `running`, `done` or `failed`. It waits up to `wait` seconds (default 30, at most 50, so one read stays under a 60 s client timeout; `0` answers at once) and answers as soon as the job finishes. A failed job is a successful read: over HTTP `200 { result: { state: "failed", error } }`, over MCP a tool result without `isError`. `result` is rendered by the reading door's `render`, so MCP shows the job's result the way a direct call would have.
+- **Errors in a job.** A thrown ActionError (or anything with a numeric `status` and a string `code`) becomes `error: { status, code, message, issues?, body? }`, headers dropped. Anything else is logged on the server and becomes `{ status: 500, code: "internal", message: "something broke on the server" }`, as a direct call would.
+- **Who reads a job.** `job.get` is listed wherever a long action is listed for that caller, and only there. It skips the app's `allow`, `schema`, `around`, `describe` and `render` hooks for itself, and checks the job's own action instead: a caller reads a job only when that action would be listed for it on the door it reads through. The id is a random UUID, so holding it is the rest of the check by default; an app with sign-in adds `jobOwner(caller)` to its hooks, and then only a caller with the same owner (`===`) reads the job. Every refusal is `404 unknown_job`, the same answer as for an id that never existed.
+- **Where jobs live.** In memory, in the registry, shared by every door. A finished job is kept for an hour and at most 1000 are kept (oldest finished go first; running ones are never dropped); `createRegistry(defs, { jobs: { keepMs, max } })` changes both. A restart loses every job: the work that was running dies with the process, as a direct call's would, and its id then reads `unknown_job`.
+- **The change stream.** The action's `change` event fires when the job finishes successfully, not when it starts, and carries the job id: `{ action, door, job }`. A failed job sends nothing.
+- **The CLI** waits by default: it prints the job id to stderr, reads `job.get` until the job is done, then prints the result (or exits 1 with `code: message`). A shell call has no 60 s timeout, and a script wants the outcome and the exit code. `--no-wait` prints the job and returns. `actions` and `help` mark long actions.
+- **The browser client's `act`** waits too and returns the result or throws the ActionError, so a page uses a long action like any other; `act(name, input, { wait: false })` returns the job.
+- **App code and nested runs** run inline: `reg.run` and a call from inside another action return the result (a promise), with no job. The job belongs to the door call; a nested job would detach the work from the outer action and hand its code a ticket it did not ask for. An app-written door from `reg.door` does start jobs; `door.starts(name)` says when.
+- **Guidance.** When any action is long, the MCP `instructions` get a paragraph after the app's own, the served skill a "Long actions" section and `(long)` on the tool, and the CLI's `actions` and `help` say so. An app with a long action needs nothing else; an app with its own action named `job.get` (or `job_get`) is refused at `createRegistry`, since the kit's reader takes that name.
+
 ## The pieces
 
+- **Naming actions in text.** Write the MCP spelling (`look_roll`) in `instructions` and anything else an agent reads: the MCP tools use it, the skill lists it for both, and the CLI takes it as well as the dotted name (`uncharted look_roll --for x`).
 - `kit<Caller, RunCtx, Fields?, ExtraInput?>()` returns a typed `defineAction` and `createRegistry`. The untyped ones are exported directly.
-- `createRegistry(definitions, hooks)` takes one list (a repeated name throws) and the hooks `schema(def)`, `allow(def, caller)`, `around(def, input, caller, next, info)` and `error(problem)`.
+- `createRegistry(definitions, hooks)` takes one list (a repeated name throws) and the hooks `schema(def)`, `allow(def, caller)`, `around(def, input, caller, next, info)`, `error(problem)` and, for long actions, `jobOwner(caller)` and the `jobs` settings. `allow` decides synchronously: one that returns a promise refuses every call, so resolve async facts in the caller resolver.
 - `reg.run(name, input, caller, info?)` runs allow, then validation against `schema(def)`, then `around`. The core never awaits: a sync chain returns a value, an async one a promise.
 - `reg.door({ name, list, describe, render, draft })` makes a door an app can use itself: `catalog(caller)` and `run(name, input, caller)`, which refuses what it does not list.
 - `ActionError(status, code, message, { issues, body, headers })` is the one error to throw. Doors render any thrown error by its `status`, `code`, `message` and `issues`.
@@ -104,7 +127,7 @@ pnpm test        # node:test, straight from the TypeScript source
 pnpm gate        # Biome check, typecheck, build, tests, pack check
 ```
 
-The suite covers the core against two fixtures (a notes app, and a Tandem-shaped app on `node:sqlite` with spaces, transactions, nested calls and proposals), an app-written door, the guard with and without a caller, the MCP door through the official SDK client and side by side with the SDK's own server, raw malformed MCP requests, the change stream read with `fetch`, the served CLI as a child process, the browser client, type tests compiled against the packed tarball, and the notes example answering over HTTP, MCP, the CLI and the browser client in one run.
+The suite covers the core against two fixtures (a notes app, and a Tandem-shaped app on `node:sqlite` with spaces, transactions, nested calls and proposals), an app-written door, the guard with and without a caller, the MCP door through the official SDK client and side by side with the SDK's own server, raw malformed MCP requests, the change stream read with `fetch`, the served CLI as a child process, the browser client, long actions through the core door, HTTP, the SDK client, the CLI, the browser client and the change stream, type tests compiled against the packed tarball, and the notes example answering over HTTP, MCP, the CLI and the browser client in one run.
 
 ## Not done, or done differently from the plan
 

@@ -1,7 +1,13 @@
 // the files the doors serve: the CLI and the browser client with the app's name and address
 // filled in, the skill generated from the MCP door's tools, and the setup page
 import { readFileSync } from "node:fs";
-import type { CatalogEntry } from "../core.ts";
+import { type CatalogEntry, JOB_WAIT_DEFAULT } from "../core.ts";
+
+/** the kit's own guidance for long actions, in MCP's instructions and the skill */
+export const LONG_GUIDE =
+  "Some tools are long (their description says so): they answer at once with a job id instead of " +
+  `the result. Start it, then read it with job_get, which waits up to ${JOB_WAIT_DEFAULT} s per call; ` +
+  "call it again while the state is running. A job's result or error stays readable for an hour.";
 
 /** the app's name as a file, command and MCP server name: lowercase, dashes */
 export function slugOf(name: string): string {
@@ -90,7 +96,12 @@ export function skillMarkdown(app: AppInfo, tools: CatalogEntry[]): string {
     : `${app.name}'s actions, for its people and their agents.`;
   const lines = setupLines(app);
   // one spelling throughout: the CLI takes the tool name as well as the dotted one
-  const list = tools.map((t) => `- \`${t.tool}\` (CLI \`${app.slug} ${t.tool}\`): ${t.summary}`).join("\n");
+  const list = tools
+    .map((t) => `- \`${t.tool}\` (CLI \`${app.slug} ${t.tool}\`): ${t.summary}${t.long ? " (long)" : ""}`)
+    .join("\n");
+  const long = tools.some((t) => t.long)
+    ? `\n## Long actions\n\n${LONG_GUIDE} The CLI waits for the result by itself; \`--no-wait\` prints the job instead.\n`
+    : "";
   return `---
 name: ${app.slug}
 description: ${JSON.stringify(description)}
@@ -106,7 +117,7 @@ ${app.instructions ? `${app.instructions}\n\n` : ""}## How to reach it
 ## Tools
 
 ${list || "(none for this caller)"}
-`;
+${long}`;
 }
 
 const escapeHtml = (s: string) =>

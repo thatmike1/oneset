@@ -13,12 +13,13 @@ export type {
   DoorOptions,
   Draft,
   Hooks,
+  JobView,
   JsonSchema,
   KitProblem,
   Registry,
   RunInfo,
 } from "./core.ts";
-export { toolName } from "./core.ts";
+export { JOB_ACTION, JOB_WAIT_DEFAULT, JOB_WAIT_MAX, toolName } from "./core.ts";
 export { ActionError, type ActionErrorExtra, errorShape, type RenderedError } from "./errors.ts";
 
 /**

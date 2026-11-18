@@ -52,10 +52,28 @@ export function createClient(options = {}) {
     return data;
   }
 
-  /** runs an action and returns its result; a failure throws an ActionError with status and code */
-  async function act(name, input = {}) {
+  /**
+   * runs an action and returns its result; a failure throws an ActionError with status and code.
+   * A long action answers with a job, which this waits for; `{ wait: false }` returns the job
+   */
+  async function act(name, input = {}, options = {}) {
     const data = await request("POST", `/api/actions/${encodeURIComponent(name)}`, input);
-    return data.result;
+    if (!data.job) return data.result;
+    if (options.wait === false) return data.job;
+    let job = data.job;
+    while (job.state === "running") {
+      job = (await request("POST", "/api/actions/job.get", { id: job.id })).result;
+    }
+    if (job.state === "failed") {
+      const error = job.error ?? {};
+      throw new ActionError(
+        error.status ?? 500,
+        error.code ?? "failed",
+        error.message ?? "the job failed",
+        error.issues,
+      );
+    }
+    return job.result;
   }
 
   /** the actions this page may run, with their input schemas */
@@ -134,8 +152,8 @@ const pageClient = () => {
   return page;
 };
 
-/** runs an action and returns its result; a failure throws an ActionError with status and code */
-export const act = (name, input) => pageClient().act(name, input);
+/** runs an action and returns its result, waiting for a long one's job; see the client's `act` */
+export const act = (name, input, options) => pageClient().act(name, input, options);
 /** the actions this page may run, with their input schemas */
 export const actions = () => pageClient().actions();
 /** calls `fn` after every change; returns a function that stops listening */

@@ -6,6 +6,8 @@
 //   <app> note.add --text "milk"         run one; fields as --name value (note_add, the MCP
 //                                        tool's spelling, works too)
 //   <app> note.add --json '{"text":"x"}' the whole input as JSON (or --json - for stdin)
+//   <app> look.roll --no-wait            a long action: print its job instead of waiting for it
+//   <app> job.get --id <job id>          read a long action's job
 //   <app> login <url> [key]              point it at another server, with an agent key if it needs one
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -90,6 +92,13 @@ function fieldHelp(entry) {
   const props = entry.inputSchema.properties ?? {};
   const required = new Set(entry.inputSchema.required ?? []);
   const lines = [`${entry.name}: ${entry.summary}`, ""];
+  if (entry.long) {
+    lines.push(
+      "long: it runs as a job. This CLI waits for the result and prints it; --no-wait prints the job",
+      `instead, which ${APP.slug} job.get --id <job id> reads later.`,
+      "",
+    );
+  }
   for (const [name, p] of Object.entries(props)) {
     const type = p.enum ? p.enum.join("|") : (p.type ?? (p.anyOf ?? []).map((a) => a.type).join("|"));
     const flag = name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
@@ -112,7 +121,7 @@ const cfg = loadConfig();
 
 if (!cmd || cmd === "--help" || cmd === "-h") {
   process.stdout.write(
-    `${APP.slug} <action> [--field value ...] | actions | help <action> | login <url> [key]\n` +
+    `${APP.slug} <action> [--field value ...] [--no-wait] | actions | help <action> | login <url> [key]\n` +
       `talks to ${cfg.url} (set ${APP.env}_URL and ${APP.env}_KEY, or run login, to change it)\n`,
   );
 } else if (cmd === "login") {
@@ -130,7 +139,7 @@ if (!cmd || cmd === "--help" || cmd === "-h") {
       area = a.area;
       process.stdout.write(`${area}\n`);
     }
-    process.stdout.write(`  ${a.name.padEnd(22)} ${a.summary}\n`);
+    process.stdout.write(`  ${a.name.padEnd(22)} ${a.summary}${a.long ? " (long)" : ""}\n`);
   }
 } else if (cmd === "help") {
   const { actions } = await call(cfg, "GET", "/api/actions");
@@ -141,11 +150,31 @@ if (!cmd || cmd === "--help" || cmd === "-h") {
   const { actions } = await call(cfg, "GET", "/api/actions");
   const entry = find(actions, cmd);
   if (!entry) die(`no action ${cmd}; run ${APP.slug} actions`);
+  const noWait = rest.includes("--no-wait");
   const out = await call(
     cfg,
     "POST",
     `/api/actions/${encodeURIComponent(entry.name)}`,
-    parseFlags(rest, entry.inputSchema),
+    parseFlags(
+      rest.filter((a) => a !== "--no-wait"),
+      entry.inputSchema,
+    ),
   );
-  print(out.result);
+  if (!out.job) print(out.result);
+  else if (noWait) print(out.job);
+  else {
+    // a long action: wait here, where no client timeout cuts the call short, and say how to
+    // read the job if this process is stopped first
+    const { id } = out.job;
+    process.stderr.write(
+      `${entry.name} runs as job ${id}; waiting for it (stopping this leaves it running: ${APP.slug} job.get --id ${id})\n`,
+    );
+    let job = out.job;
+    while (job.state === "running") {
+      job = (await call(cfg, "POST", "/api/actions/job.get", { id })).result;
+    }
+    if (job.state === "failed")
+      die(`${job.error?.code ?? "failed"}: ${job.error?.message ?? "the job failed"}`);
+    print(job.result);
+  }
 }

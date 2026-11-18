@@ -204,7 +204,9 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           const input = await guard.readJson(req);
           const caller = await resolve(req, "http");
           const result = await http.run(name, input, caller);
-          sendJson(res, 200, { result });
+          // a long action's start: 202 Accepted with { job }, read with job.get
+          if (http.starts(name)) sendJson(res, 202, result);
+          else sendJson(res, 200, { result });
           break;
         }
         case "stream":

@@ -3,8 +3,16 @@
 // Protocol errors stay JSON-RPC errors; a failed tool call, an unknown tool and invalid arguments
 // come back as tool results with isError, as the official SDK does.
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AnyAction, Door, DoorOptions, Registry } from "../core.ts";
+import {
+  type AnyAction,
+  type Door,
+  type DoorOptions,
+  JOB_ACTION,
+  JOB_WAIT_DEFAULT,
+  type Registry,
+} from "../core.ts";
 import { errorShape } from "../errors.ts";
+import { LONG_GUIDE } from "./files.ts";
 import { createGuard, type GuardOptions, maxBodyOf } from "./guard.ts";
 
 /**
@@ -256,7 +264,9 @@ export function mcpTools(door: Door, caller: unknown): Record<string, unknown>[]
     const shown = door.describe(def, caller);
     const tool: Record<string, unknown> = { name: def.name.replaceAll(".", "_") };
     if (shown.title !== undefined) tool.title = shown.title;
-    tool.description = shown.summary;
+    tool.description = def.long
+      ? `${shown.summary.replace(/\.?$/, ".")} Long: answers at once with a job id; read the result with job_get.`
+      : shown.summary;
     tool.inputSchema = door.inputSchema(def);
     if (shown.annotations !== undefined) tool.annotations = shown.annotations;
     // the SDK marks every plain tool this way; kept so answers match an app's SDK-built ones
@@ -290,7 +300,15 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
   // the same guard doors() puts in front of every path, so a standalone mount keeps it
   const guard = createGuard({ ...(hosts ? { hosts } : {}), ...(origins ? { origins } : {}) });
   const tools = (reg as Registry).door({ ...door, draft, name: "mcp" });
-  const byTool = new Map((reg as Registry).actions.map((def) => [def.name.replaceAll(".", "_"), def]));
+  const jobDef = (reg as Registry).get(JOB_ACTION);
+  const byTool = new Map(
+    [...(reg as Registry).actions, ...(jobDef ? [jobDef] : [])].map((def) => [
+      def.name.replaceAll(".", "_"),
+      def,
+    ]),
+  );
+  // the kit's guidance for long actions goes after the app's own
+  const guide = jobDef ? [instructions, LONG_GUIDE].filter(Boolean).join("\n\n") : instructions;
 
   async function callTool(params: Record<string, unknown>, caller: unknown): Promise<unknown> {
     const tool = params.name;
@@ -304,6 +322,13 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     try {
       if (!def) throw (reg as Registry).unknown(tool);
       const rendered = await tools.run(def.name, args, caller);
+      if (tools.starts(def.name)) {
+        const { job } = rendered as { job: { id: string } };
+        const next =
+          `${def.name} runs in the background as a job. Read it with job_get with ${JSON.stringify({ id: job.id })}: ` +
+          `each call waits up to ${JOB_WAIT_DEFAULT} s for it to finish; call again while the state is running.`;
+        return { content: [{ type: "text", text: `${JSON.stringify({ job }, null, 2)}\n\n${next}` }] };
+      }
       return { content: [{ type: "text", text: toolText(rendered) }] };
     } catch (err) {
       const shape = errorShape(err);
@@ -335,7 +360,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
           capabilities: { tools: {} },
           serverInfo: { name, version },
         };
-        if (instructions) result.instructions = instructions;
+        if (guide) result.instructions = guide;
         return result;
       }
       case "ping":
