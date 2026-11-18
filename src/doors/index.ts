@@ -212,10 +212,13 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           else sendJson(res, 200, { result });
           break;
         }
-        case "stream":
-          await resolve(req, "stream");
-          openStream(registry, req, res);
+        case "stream": {
+          // each subscriber hears what its caller may know: the http door's listing, and a job
+          // id only for its owner (with no sign-in, everyone is the one person)
+          const caller = await resolve(req, "stream");
+          openStream(registry, req, res, (change) => http.changeFor(change, caller, !opts.caller));
           break;
+        }
         case "skill": {
           const caller = await resolve(req, "skill");
           sendText(

@@ -1,12 +1,18 @@
 // the change stream: server-sent events, one `change` event after every mutating run that
 // succeeds at the outermost level, so an open page refetches when an agent changes something
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { Registry } from "../core.ts";
+import type { Change, Registry } from "../core.ts";
 
 /** how often a comment line keeps idle proxies from closing the stream */
 export const PING_MS = 25_000;
 
-export function openStream(reg: Registry, req: IncomingMessage, res: ServerResponse): void {
+/** `heard` decides what this subscriber may know of each change; null sends nothing */
+export function openStream(
+  reg: Registry,
+  req: IncomingMessage,
+  res: ServerResponse,
+  heard: (change: Change) => Change | null = (change) => change,
+): void {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -15,7 +21,8 @@ export function openStream(reg: Registry, req: IncomingMessage, res: ServerRespo
   });
   res.write(": connected\n\n");
   const off = reg.onChange((change) => {
-    if (!res.writableEnded) res.write(`event: change\ndata: ${JSON.stringify(change)}\n\n`);
+    const sent = heard(change);
+    if (sent && !res.writableEnded) res.write(`event: change\ndata: ${JSON.stringify(sent)}\n\n`);
   });
   const ping = setInterval(() => {
     if (!res.writableEnded) res.write(": ping\n\n");

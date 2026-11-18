@@ -144,6 +144,12 @@ export interface Door<Def = AnyAction, Caller = any> {
   run(name: string, input: unknown, caller: Caller, options?: DoorRunOptions): unknown;
   /** whether `run` answers this action with a job instead of its outcome */
   starts(name: string): boolean;
+  /**
+   * what a subscriber resolved as `caller` may hear of a change: nothing unless this door lists
+   * the action for it, and the job id only when it owns the job (the `jobOwner` hook), or when
+   * `oneParty` says every caller is the same party (an app with no sign-in)
+   */
+  changeFor(change: Change, caller: Caller, oneParty?: boolean): Change | null;
 }
 
 /** what a door's run takes besides the call itself */
@@ -615,6 +621,14 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
           inputSchema: inputSchema(def),
         })),
       starts: (name) => byName.get(name)?.long === true,
+      changeFor(change, caller, oneParty = false) {
+        const def = byName.get(change.action);
+        if (!def || !listsAction(def, caller)) return null;
+        if (change.job === undefined) return change;
+        const job = jobs.get(change.job);
+        const owns = oneParty || (hooks.jobOwner !== undefined && job?.owner === hooks.jobOwner(caller));
+        return owns ? change : { action: change.action, door: change.door };
+      },
       run(name, input, caller, runOptions) {
         const def = byName.get(name);
         if (!def) throw problem({ kind: "unknown_action", name });

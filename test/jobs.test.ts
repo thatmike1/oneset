@@ -823,4 +823,63 @@ describe("long actions, after review", () => {
       await app.close();
     }
   });
+
+  test("a signed-in app's stream tells each caller only what it may know", async () => {
+    interface Who {
+      user: string;
+      rolls: boolean;
+    }
+    const users: Record<string, Who> = {
+      "Bearer mike": { user: "mike", rolls: true },
+      "Bearer gabca": { user: "gabca", rolls: true },
+      "Bearer guest": { user: "guest", rolls: false },
+    };
+    const caller = (req: { headers: { authorization?: string } }) => {
+      const who = users[req.headers.authorization ?? ""];
+      if (!who) throw new ActionError(401, "signed_out", "sign in");
+      return who;
+    };
+    const allow = (def: { name: string }, who: Who) => {
+      if (def.name === "look.roll" && !who.rolls) throw new ActionError(403, "no", "no rolls");
+    };
+    const watch = async (url: string, as: string) =>
+      openEvents(`${url}/api/actions/stream`, { authorization: `Bearer ${as}` });
+    const start = (port: number, as: string) =>
+      raw(port, {
+        method: "POST",
+        path: "/api/actions/look.roll",
+        headers: { "content-type": "application/json", authorization: `Bearer ${as}` },
+        body: JSON.stringify({ for: as }),
+      });
+
+    // with an owner rule: the owner hears the job id; another caller who may roll hears that
+    // something changed, with no id; a caller who may not roll hears nothing
+    const owned = createRegistry(looksApp({ ms: 20 }).actions, { allow, jobOwner: (who: Who) => who.user });
+    const app = await serve(doors(owned, { name: "owned", caller }));
+    try {
+      const streams = await Promise.all(["mike", "gabca", "guest"].map((u) => watch(app.url, u)));
+      const { id } = (await start(app.port, "mike")).json().job as JobView;
+      const heard = await Promise.all(streams.map((s) => s.next(1000)));
+      assert.deepEqual(
+        heard.map((e) => (e ? JSON.parse(e.data) : null)),
+        [{ action: "look.roll", door: "http", job: id }, { action: "look.roll", door: "http" }, null],
+      );
+      for (const s of streams) s.close();
+    } finally {
+      await app.close();
+    }
+
+    // with sign-in and no owner rule, no stream gets a job id, the starter's own included
+    const unowned = createRegistry(looksApp({ ms: 20 }).actions, { allow });
+    const app2 = await serve(doors(unowned, { name: "unowned", caller }));
+    try {
+      const mike = await watch(app2.url, "mike");
+      await start(app2.port, "mike");
+      const event = await mike.next(1000);
+      assert.deepEqual(JSON.parse(event?.data ?? "null"), { action: "look.roll", door: "http" });
+      mike.close();
+    } finally {
+      await app2.close();
+    }
+  });
 });
