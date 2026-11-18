@@ -443,6 +443,77 @@ describe("raw malformed requests", () => {
     assert.equal(unknown.json().result.protocolVersion, "2025-11-25");
   });
 
+  // the known nested and optional fields of initialize, typed as the 2025-11-25 schema types them;
+  // extension capabilities and extra fields stay open
+  test("initialize with a malformed known subfield is invalid params, extensions pass", async () => {
+    const good = { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } };
+    const init = (params: unknown) =>
+      post(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "initialize", params }));
+    const caps = (capabilities: unknown) => ({ ...good, capabilities });
+    const client = (extra: Record<string, unknown>) => ({
+      ...good,
+      clientInfo: { ...good.clientInfo, ...extra },
+    });
+    for (const params of [
+      caps({ roots: { listChanged: "yes" } }),
+      caps({ roots: [] }),
+      caps({ sampling: [] }),
+      caps({ sampling: { tools: true } }),
+      caps({ elicitation: "form" }),
+      caps({ elicitation: { url: 1 } }),
+      caps({ tasks: { requests: { sampling: { createMessage: [] } } } }),
+      caps({ experimental: [] }),
+      caps({ experimental: { x: true } }),
+      caps({ experimental: { "": 1 } }),
+      client({ title: 5 }),
+      client({ description: null }),
+      client({ websiteUrl: {} }),
+      client({ icons: "https://example.com/i.png" }),
+      client({ icons: [{}] }),
+      client({ icons: [{ src: "https://example.com/i.png", sizes: "48x48" }] }),
+      client({ icons: [{ src: "https://example.com/i.png", theme: "blue" }] }),
+      { ...good, _meta: [] },
+      { ...good, _meta: { progressToken: {} } },
+    ]) {
+      const res = await init(params);
+      assert.equal(res.json().error?.code, -32602, JSON.stringify(params));
+    }
+    const full = {
+      protocolVersion: "2025-11-25",
+      capabilities: {
+        roots: { listChanged: true, extra: 1 },
+        sampling: { context: {}, tools: {} },
+        elicitation: { form: {}, url: {} },
+        tasks: {
+          list: {},
+          cancel: {},
+          requests: { sampling: { createMessage: {} }, elicitation: { create: {} } },
+        },
+        experimental: { x: {} },
+        "vendor/extension": ["anything"],
+      },
+      clientInfo: {
+        name: "t",
+        version: "1",
+        title: "T",
+        description: "a test client",
+        websiteUrl: "https://example.com",
+        icons: [{ src: "https://example.com/i.png", mimeType: "image/png", sizes: ["48x48"], theme: "dark" }],
+        extra: true,
+      },
+      _meta: { progressToken: 7, "vendor/x": [] },
+      extra: "kept",
+    };
+    for (const params of [
+      full,
+      caps({ sampling: {}, elicitation: {} }),
+      { ...good, _meta: { progressToken: "a" } },
+    ]) {
+      const res = await init(params);
+      assert.equal(res.json().result?.protocolVersion, "2025-11-25", JSON.stringify(params));
+    }
+  });
+
   test("params that are not an object, or tool arguments that are not one, are invalid params", async () => {
     for (const msg of [
       { jsonrpc: "2.0", id: 6, method: "ping", params: [] },

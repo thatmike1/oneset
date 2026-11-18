@@ -130,7 +130,55 @@ function accepts(header: string, type: string): boolean {
   return false;
 }
 
-/** the required fields of initialize's params, per the 2025-11-25 schema */
+/** a known field's type: a JSON type, or an object whose known keys have these types */
+type Shape = "object" | "boolean" | "string" | { readonly [key: string]: Shape };
+
+/** the client capabilities the 2025-11-25 schema names; others are extensions and stay open */
+const CAPABILITIES: Shape = {
+  roots: { listChanged: "boolean" },
+  sampling: { context: "object", tools: "object" },
+  elicitation: { form: "object", url: "object" },
+  tasks: {
+    list: "object",
+    cancel: "object",
+    requests: { sampling: { createMessage: "object" }, elicitation: { create: "object" } },
+  },
+};
+const CLIENT_INFO: Shape = { title: "string", description: "string", websiteUrl: "string" };
+const ICON: Shape = { mimeType: "string" };
+
+/** what is wrong with a value of this shape, if anything; keys a shape does not name pass */
+function misfit(value: unknown, shape: Shape, path: string): string | undefined {
+  if (shape === "boolean" || shape === "string") {
+    return typeof value === shape ? undefined : `${path} must be a ${shape}`;
+  }
+  if (!isObject(value)) return `${path} must be an object`;
+  if (shape === "object") return undefined;
+  for (const [key, inner] of Object.entries(shape)) {
+    if (!Object.hasOwn(value, key)) continue;
+    const bad = misfit(value[key], inner, `${path}.${key}`);
+    if (bad) return bad;
+  }
+  return undefined;
+}
+
+function misfitIcon(icon: unknown, path: string): string | undefined {
+  const bad = misfit(icon, ICON, path);
+  if (bad || !isObject(icon)) return bad ?? `${path} must be an object`;
+  if (typeof icon.src !== "string") return `${path}.src must be a string`;
+  if (Object.hasOwn(icon, "sizes")) {
+    const sizes = icon.sizes;
+    if (!Array.isArray(sizes) || !sizes.every((s) => typeof s === "string")) {
+      return `${path}.sizes must be an array of strings`;
+    }
+  }
+  if (Object.hasOwn(icon, "theme") && icon.theme !== "light" && icon.theme !== "dark") {
+    return `${path}.theme must be light or dark`;
+  }
+  return undefined;
+}
+
+/** initialize's params against the 2025-11-25 schema: required fields, and known optional ones typed */
 function checkInitialize(params: Record<string, unknown>): void {
   if (typeof params.protocolVersion !== "string")
     throw invalidParams("initialize needs a protocolVersion string");
@@ -139,6 +187,32 @@ function checkInitialize(params: Record<string, unknown>): void {
   if (!isObject(client) || typeof client.name !== "string" || typeof client.version !== "string") {
     throw invalidParams("initialize needs clientInfo with a name and a version");
   }
+  const caps = params.capabilities;
+  let bad = misfit(caps, CAPABILITIES, "capabilities") ?? misfit(client, CLIENT_INFO, "clientInfo");
+  if (!bad && Object.hasOwn(caps, "experimental")) {
+    const experimental = caps.experimental;
+    if (!isObject(experimental)) bad = "capabilities.experimental must be an object";
+    else {
+      const key = Object.keys(experimental).find((k) => !isObject(experimental[k]));
+      if (key !== undefined) bad = `capabilities.experimental.${key} must be an object`;
+    }
+  }
+  if (!bad && Object.hasOwn(client, "icons")) {
+    const icons = client.icons;
+    if (!Array.isArray(icons)) bad = "clientInfo.icons must be an array";
+    else for (const [i, icon] of icons.entries()) bad ??= misfitIcon(icon, `clientInfo.icons[${i}]`);
+  }
+  if (!bad && Object.hasOwn(params, "_meta")) {
+    const meta = params._meta;
+    if (!isObject(meta)) bad = "_meta must be an object";
+    else if (Object.hasOwn(meta, "progressToken")) {
+      const token = meta.progressToken;
+      if (typeof token !== "string" && typeof token !== "number") {
+        bad = "_meta.progressToken must be a string or a number";
+      }
+    }
+  }
+  if (bad) throw invalidParams(bad);
 }
 
 const toolText = (rendered: unknown): string =>
