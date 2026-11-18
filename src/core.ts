@@ -12,6 +12,11 @@ export interface RunInfo {
   door: string;
   /** the job's id when a door started this run as a job (a long action) */
   job?: string;
+  /**
+   * for `around`: this run changed nothing after all (it rolled back, or was a dry run), so no
+   * change event goes out for it even though it returns normally. Not enumerable
+   */
+  skipChange(): void;
 }
 
 /** an action: name, area, summary, zod input, `mutates` and `run`, plus any fields the app adds */
@@ -387,24 +392,29 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     data: Record<string, unknown>,
     caller: unknown,
     info?: Partial<RunInfo>,
-    announce = true,
+    control: { announce: boolean; skipped: boolean } = { announce: true, skipped: false },
   ): unknown {
-    const runInfo: RunInfo = { nested: info?.nested ?? false, door: info?.door ?? "direct" };
+    const runInfo = { nested: info?.nested ?? false, door: info?.door ?? "direct" } as RunInfo;
     if (info?.job !== undefined) runInfo.job = info.job;
+    // kept off the enumerable fields, so the info still reads as plain data
+    Object.defineProperty(runInfo, "skipChange", {
+      value: () => {
+        control.skipped = true;
+      },
+    });
     const out = hooks.around
       ? hooks.around(def, data, caller, (i, ctx) => def.run(i, ctx), runInfo)
       : def.run(data, caller);
     // the listeners are looked at when the run finishes, not now: a page may subscribe meanwhile
-    if (!def.mutates || runInfo.nested || !announce) return out;
+    if (!def.mutates || runInfo.nested || !control.announce) return out;
     const change: Change = { action: def.name, door: runInfo.door };
-    if (runInfo.job !== undefined) change.job = runInfo.job;
     if (isThenable(out)) {
       return Promise.resolve(out).then((value) => {
-        emit(change);
+        if (!control.skipped) emit(change);
         return value;
       });
     }
-    emit(change);
+    if (!control.skipped) emit(change);
     return out;
   }
 
@@ -448,6 +458,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       waiters: new Set(),
     };
     jobs.set(job.id, job);
+    const control = { announce: false, skipped: false };
     const settle = () => {
       for (const wake of [...job.waiters]) wake();
     };
@@ -458,7 +469,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       finished(job);
       settle();
       // after the state is set, so a listener that reads the job finds it done
-      if (def.mutates) emit({ action: def.name, door, job: job.id });
+      if (def.mutates && !control.skipped) emit({ action: def.name, door, job: job.id });
     };
     const fail = (err: unknown) => {
       job.state = "failed";
@@ -468,7 +479,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       settle();
     };
     try {
-      const out = execute(def, data, caller, { door, job: job.id }, false);
+      const out = execute(def, data, caller, { door, job: job.id }, control);
       if (isThenable(out)) Promise.resolve(out).then(succeed, fail);
       else succeed(out);
     } catch (err) {

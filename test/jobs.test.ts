@@ -739,4 +739,59 @@ describe("long actions, after review", () => {
       await app.close();
     }
   });
+
+  test("around marks a rolled-back run with info.skipChange(), inline and as a job", async () => {
+    const rows: string[] = [];
+    const reg = createRegistry(
+      [
+        defineAction({
+          name: "row.add",
+          area: "rows",
+          summary: "add a row",
+          mutates: true,
+          input: z.object({ text: z.string(), keep: z.boolean() }),
+          run: (input) => {
+            rows.push(input.text);
+            return input.text;
+          },
+        }),
+        defineAction({
+          name: "row.add_slow",
+          area: "rows",
+          summary: "add a row slowly",
+          mutates: true,
+          long: true,
+          input: z.object({ text: z.string(), keep: z.boolean() }),
+          run: async (input) => {
+            rows.push(input.text);
+            return input.text;
+          },
+        }),
+      ],
+      {
+        // a transaction that rolls back and still answers normally
+        around(_def, input, caller, next, info) {
+          const before = rows.length;
+          const out = next(input, caller);
+          const finish = (value: unknown) => {
+            if (input.keep) return value;
+            rows.length = before;
+            info.skipChange();
+            return { committed: false };
+          };
+          return out instanceof Promise ? out.then(finish) : finish(out);
+        },
+      },
+    );
+    const heard: unknown[] = [];
+    reg.onChange((change) => heard.push(change));
+    assert.deepEqual(reg.run("row.add", { text: "a", keep: false }, undefined), { committed: false });
+    assert.equal(reg.run("row.add", { text: "b", keep: true }, undefined), "b");
+    const door = reg.door({ name: "page" });
+    const { job } = door.run("row.add_slow", { text: "c", keep: false }, undefined) as { job: JobView };
+    const done = (await door.run("job.get", { id: job.id }, undefined)) as JobView;
+    assert.deepEqual(done.result, { committed: false });
+    assert.deepEqual(rows, ["b"]);
+    assert.deepEqual(heard, [{ action: "row.add", door: "direct" }]);
+  });
 });
