@@ -60,7 +60,7 @@ export interface Hooks<Caller = any, RunCtx = any, Def = AnyAction> {
    * returns nothing, or throws the app's own error. It decides synchronously: one that returns a
    * promise refuses every call (resolve async facts in the caller resolver)
    */
-  allow?(def: Def, caller: Caller): undefined;
+  allow?(def: Def, caller: Caller): void;
   /**
    * wraps the handler: `next(input, ctx)` runs it. May change the input, build the context,
    * call `next` more than once and return something other than the handler's result

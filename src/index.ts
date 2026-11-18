@@ -24,6 +24,17 @@ export { JOB_ACTION, JOB_WAIT_DEFAULT, JOB_WAIT_MAX, toolName } from "./core.ts"
 export { ActionError, type ActionErrorExtra, errorShape, type RenderedError } from "./errors.ts";
 
 /**
+ * refuses an `allow` whose return type is a promise: it would decide after the run started. A
+ * void-returning function still fits, since void says nothing about a promise; the run refuses
+ * one that returns a promise anyway
+ */
+type SyncAllow<H> = H extends { allow?: (...args: any[]) => infer R }
+  ? [Extract<R, PromiseLike<unknown>>] extends [never]
+    ? unknown
+    : { allow: "allow must decide synchronously: resolve async facts in the caller resolver" }
+  : unknown;
+
+/**
  * a typed setup: `defineAction` and `createRegistry` that know the caller the doors pass in,
  * the context handlers receive, the fields the app adds to a definition, and any input
  * fields its `schema` hook adds for every action
@@ -47,7 +58,10 @@ export function kit<
   function createRegistry<
     const D extends readonly (ActionDef<string, any, any, RunCtx> & Fields)[],
     H extends Hooks<Caller, RunCtx, Def> = {},
-  >(definitions: D, hooks?: H & Hooks<Caller, RunCtx, Def>): Registry<D[number], Caller, ExtraInput, H, Def> {
+  >(
+    definitions: D,
+    hooks?: H & Hooks<Caller, RunCtx, Def> & SyncAllow<H>,
+  ): Registry<D[number], Caller, ExtraInput, H, Def> {
     return buildRegistry(definitions, hooks as Hooks) as never;
   }
 

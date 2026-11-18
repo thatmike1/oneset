@@ -184,3 +184,18 @@ const notJob: Promise<ClientJob> = client.act("note.later", { n: 1 }, { wait: fa
 void notJob;
 const either: Promise<ClientJob | { n: number }> = client.act("note.later", { n: 1 }, { wait: false });
 void either;
+
+// allow decides synchronously: an existing void-returning helper fits, an async one does not
+const allowHelper: (def: { name: string }, caller: Actor) => void = (_def, caller) => {
+  if (caller.user === "agent") throw new ActionError(403, "no", "no");
+};
+createRegistry([add], { allow: allowHelper });
+createRegistry([add], {
+  allow(def, caller) {
+    if (def.access === "human" && caller.user === "agent") throw new ActionError(403, "no", "no");
+  },
+});
+createRegistry([add], {
+  // @ts-expect-error an allow that returns a promise is refused at compile time
+  allow: async () => {},
+});
