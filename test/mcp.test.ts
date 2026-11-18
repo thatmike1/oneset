@@ -358,18 +358,44 @@ describe("raw malformed requests", () => {
     assert.equal(res.json().error.code, -32602);
   });
 
-  test("a batch gets a batch of answers", async () => {
-    const res = await post(
-      JSON.stringify([
-        { jsonrpc: "2.0", id: 1, method: "ping" },
-        { jsonrpc: "2.0", method: "notifications/initialized" },
-        { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "note_count" } },
-      ]),
-    );
-    assert.deepEqual(res.json(), [
-      { jsonrpc: "2.0", id: 1, result: {} },
-      { jsonrpc: "2.0", id: 2, result: { content: [{ type: "text", text: "0" }] } },
-    ]);
+  // batches left the transport in 2025-06-18: one message per POST. The SDK still runs them;
+  // this door refuses them before anything runs, on every version
+  test("a batch is refused and nothing in it runs", async () => {
+    const reg = notesRegistry();
+    const handle = mcp(reg, { name: "notes" });
+    const alone = createServer((req, res) => {
+      const body = req.headers["x-body"] ? JSON.parse(String(req.headers["x-body"])) : undefined;
+      void handle(req, res, undefined, body);
+    });
+    await new Promise<void>((resolve) => alone.listen(0, "127.0.0.1", resolve));
+    const port = (alone.address() as AddressInfo).port;
+    const batch = [
+      { jsonrpc: "2.0", id: 1, method: "ping" },
+      { jsonrpc: "2.0", method: "notifications/initialized" },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "note_add", arguments: { text: "x" } } },
+    ];
+    try {
+      for (const version of ["2025-11-25", "2025-06-18", "2025-03-26", undefined]) {
+        const headers: Record<string, string> = { "content-type": "application/json", accept: ACCEPT };
+        if (version) headers["mcp-protocol-version"] = version;
+        const read = await raw(port, { method: "POST", path: "/mcp", headers, body: JSON.stringify(batch) });
+        // a body the app already read goes through the same check
+        const given = await raw(port, {
+          method: "POST",
+          path: "/mcp",
+          headers: { ...headers, "x-body": JSON.stringify(batch) },
+        });
+        for (const res of [read, given]) {
+          assert.equal(res.status, 400, String(version));
+          assert.equal(res.json().error.code, -32600);
+          assert.equal(res.json().id, null);
+        }
+      }
+      assert.deepEqual(reg.run("note.list", {}, undefined), [], "nothing ran");
+    } finally {
+      alone.closeAllConnections();
+      await new Promise<void>((resolve) => alone.close(() => resolve()));
+    }
   });
 
   test("an oversized body is refused", async () => {

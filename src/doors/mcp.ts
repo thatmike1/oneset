@@ -235,33 +235,37 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
           `Bad Request: Unsupported protocol version: ${version} (supported versions: ${PROTOCOL_VERSIONS.join(", ")})`,
         );
       }
-      const raw = body !== undefined ? body : await readBody(req, maxBody);
-      const batch = Array.isArray(raw);
-      const messages: unknown[] = batch ? raw : [raw];
-      if (messages.length === 0 || !messages.every(isMessage)) {
-        throw new RpcError(400, -32600, "Invalid Request: not a JSON-RPC 2.0 message");
+      const msg = body !== undefined ? body : await readBody(req, maxBody);
+      // one message per POST since 2025-06-18; a batch is refused before any of it runs
+      if (Array.isArray(msg)) {
+        throw new RpcError(
+          400,
+          -32600,
+          "Invalid Request: batches are not supported, send one message per request",
+        );
       }
-      const requests = (messages as Message[]).filter((m) => m.method !== undefined && m.id !== undefined);
+      if (!isMessage(msg)) throw new RpcError(400, -32600, "Invalid Request: not a JSON-RPC 2.0 message");
       // notifications and responses are accepted with no body
-      if (requests.length === 0) {
+      if (msg.method === undefined || msg.id === undefined) {
         res.writeHead(202);
         res.end();
         return;
       }
-      const replies = await Promise.all(
-        requests.map(async (msg) => {
-          try {
-            return { jsonrpc: "2.0", id: msg.id, result: await answer(msg, caller) };
-          } catch (err) {
-            if (err instanceof RpcError) {
-              return { jsonrpc: "2.0", id: msg.id, error: { code: err.rpcCode, message: err.message } };
-            }
-            console.error("oneset: an MCP request failed", err);
-            return { jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "Internal error" } };
-          }
-        }),
-      );
-      sendRpc(res, 200, batch ? replies : replies[0]);
+      let reply: Record<string, unknown>;
+      try {
+        reply = { jsonrpc: "2.0", id: msg.id, result: await answer(msg, caller) };
+      } catch (err) {
+        if (!(err instanceof RpcError)) console.error("oneset: an MCP request failed", err);
+        reply = {
+          jsonrpc: "2.0",
+          id: msg.id,
+          error:
+            err instanceof RpcError
+              ? { code: err.rpcCode, message: err.message }
+              : { code: -32603, message: "Internal error" },
+        };
+      }
+      sendRpc(res, 200, reply);
     } catch (err) {
       if (err instanceof RpcError) {
         sendRpc(
