@@ -3,7 +3,8 @@
 // filled in. It reads the action catalog from the server, so every action is a command here.
 //   <app> actions                        every action you may run, by area
 //   <app> help note.add                  its fields
-//   <app> note.add --text "milk"         run one; fields as --name value
+//   <app> note.add --text "milk"         run one; fields as --name value (note_add, the MCP
+//                                        tool's spelling, works too)
 //   <app> note.add --json '{"text":"x"}' the whole input as JSON (or --json - for stdin)
 //   <app> login <url> [key]              point it at another server, with an agent key if it needs one
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -100,6 +101,9 @@ function fieldHelp(entry) {
   return lines.join("\n");
 }
 
+/** an action by its name or its MCP tool name, so text written for agents names it one way */
+const find = (actions, name) => actions.find((a) => a.name === name) ?? actions.find((a) => a.tool === name);
+
 const print = (result) =>
   process.stdout.write(`${typeof result === "string" ? result : JSON.stringify(result, null, 2)}\n`);
 
@@ -130,17 +134,17 @@ if (!cmd || cmd === "--help" || cmd === "-h") {
   }
 } else if (cmd === "help") {
   const { actions } = await call(cfg, "GET", "/api/actions");
-  const entry = actions.find((a) => a.name === rest[0]);
+  const entry = find(actions, rest[0]);
   if (!entry) die(`no action ${rest[0]}; run ${APP.slug} actions`);
   process.stdout.write(`${fieldHelp(entry)}\n`);
 } else {
   const { actions } = await call(cfg, "GET", "/api/actions");
-  const entry = actions.find((a) => a.name === cmd);
+  const entry = find(actions, cmd);
   if (!entry) die(`no action ${cmd}; run ${APP.slug} actions`);
   const out = await call(
     cfg,
     "POST",
-    `/api/actions/${encodeURIComponent(cmd)}`,
+    `/api/actions/${encodeURIComponent(entry.name)}`,
     parseFlags(rest, entry.inputSchema),
   );
   print(out.result);

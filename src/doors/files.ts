@@ -89,7 +89,8 @@ export function skillMarkdown(app: AppInfo, tools: CatalogEntry[]): string {
     ? `${app.name}: ${app.when}`
     : `${app.name}'s actions, for its people and their agents.`;
   const lines = setupLines(app);
-  const list = tools.map((t) => `- \`${t.tool}\` (CLI \`${app.slug} ${t.name}\`): ${t.summary}`).join("\n");
+  // one spelling throughout: the CLI takes the tool name as well as the dotted one
+  const list = tools.map((t) => `- \`${t.tool}\` (CLI \`${app.slug} ${t.tool}\`): ${t.summary}`).join("\n");
   return `---
 name: ${app.slug}
 description: ${JSON.stringify(description)}
@@ -100,7 +101,7 @@ description: ${JSON.stringify(description)}
 ${app.instructions ? `${app.instructions}\n\n` : ""}## How to reach it
 
 - MCP server \`${app.slug}\`, tools named like \`${tools[0]?.tool ?? "area_action"}\`. If it is missing: \`${lines.mcp}\`
-- Otherwise the CLI: \`${app.slug} <action> --field value\` (\`${app.slug} actions\` lists them, \`${app.slug} help <action>\` shows the fields). Install: \`${lines.cli}\`
+- Otherwise the CLI: \`${app.slug} <tool> --field value\`, with the same tool names (\`${app.slug} actions\` lists them, \`${app.slug} help <tool>\` shows the fields). Install: \`${lines.cli}\`
 
 ## Tools
 

@@ -72,6 +72,15 @@ describe("the served CLI", () => {
     assert.equal(count.stdout, "2\n");
   });
 
+  test("takes an action by its MCP tool spelling too, so instructions name it once", async () => {
+    const help = await cli(file, ["help", "note_add"]);
+    assert.equal(help.code, 0, help.stderr);
+    assert.match(help.stdout, /^note\.add: Add a note/);
+    const count = await cli(file, ["note_count"]);
+    assert.equal(count.code, 0, count.stderr);
+    assert.match(count.stdout, /^\d+\n$/);
+  });
+
   test("an error exits non-zero with the code and message", async () => {
     const bad = await cli(file, ["note.add", "--text", ""]);
     assert.equal(bad.code, 1);
@@ -199,7 +208,7 @@ describe("the skill", () => {
       body ?? "",
       /claude mcp add --scope user --transport http notes http:\/\/127\.0\.0\.1:\d+\/mcp/,
     );
-    assert.match(body ?? "", /- `note_add` \(CLI `notes note\.add`\): Add a note\n/);
+    assert.match(body ?? "", /- `note_add` \(CLI `notes note_add`\): Add a note\n/);
     assert.ok(!(body ?? "").includes("note_fail"), "tools the MCP door hides stay out");
   });
 });
