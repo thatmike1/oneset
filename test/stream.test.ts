@@ -118,3 +118,87 @@ describe("the change stream on the Tandem-shaped app", () => {
     }
   });
 });
+
+describe("the change stream for a signed-in app", () => {
+  interface Who {
+    user: string;
+    edits: boolean;
+  }
+  const people: Record<string, Who> = {
+    "Bearer editor": { user: "editor", edits: true },
+    "Bearer viewer": { user: "viewer", edits: false },
+  };
+  const rowsApp = async () => {
+    const { createRegistry, defineAction, ActionError } = await import("../src/index.ts");
+    const { z } = await import("zod");
+    const rows: string[] = [];
+    const reg = createRegistry(
+      [
+        defineAction({
+          name: "row.add",
+          area: "rows",
+          summary: "Add a row",
+          mutates: true,
+          input: z.object({ text: z.string() }),
+          run: (input) => {
+            rows.push(input.text);
+            return input.text;
+          },
+        }),
+        defineAction({
+          name: "row.list",
+          area: "rows",
+          summary: "Every row",
+          mutates: false,
+          input: z.object({}),
+          run: () => [...rows],
+        }),
+      ],
+      {
+        allow(def, who: Who) {
+          if (def.mutates && !who.edits) throw new ActionError(403, "read_only", "viewers cannot add rows");
+        },
+      },
+    );
+    return reg;
+  };
+  const caller = (req: { headers: { authorization?: string } }) => {
+    const who = people[req.headers.authorization ?? ""];
+    if (!who) throw new Error("not signed in");
+    return who;
+  };
+  const request = (app: Served, name: string, body: unknown, as: string) =>
+    raw(app.port, {
+      method: "POST",
+      path: `/api/actions/${name}`,
+      headers: { "content-type": "application/json", authorization: `Bearer ${as}` },
+      body: JSON.stringify(body),
+    });
+
+  test("a viewer who may not add rows still hears that one was added, with nothing else", async () => {
+    const app = await serve(doors(await rowsApp(), { name: "rows", caller }));
+    try {
+      const viewer = await openEvents(`${app.url}/api/actions/stream`, { authorization: "Bearer viewer" });
+      const editor = await openEvents(`${app.url}/api/actions/stream`, { authorization: "Bearer editor" });
+      // the viewer's page: paint the list, refetch on any change
+      let painted = (await request(app, "row.list", {}, "viewer")).json().result;
+      await request(app, "row.add", { text: "shared row" }, "editor");
+      const change = await viewer.next(1000);
+      if (change) painted = (await request(app, "row.list", {}, "viewer")).json().result;
+      assert.deepEqual(painted, ["shared row"]);
+      assert.deepEqual(
+        JSON.parse(change?.data ?? "null"),
+        { changed: true },
+        "no action name for the viewer",
+      );
+      assert.deepEqual(JSON.parse((await editor.next(1000))?.data ?? "null"), {
+        action: "row.add",
+        door: "http",
+      });
+      viewer.close();
+      editor.close();
+    } finally {
+      await app.close();
+    }
+  });
+});

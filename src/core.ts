@@ -145,11 +145,19 @@ export interface Door<Def = AnyAction, Caller = any> {
   /** whether `run` answers this action with a job instead of its outcome */
   starts(name: string): boolean;
   /**
-   * what a subscriber resolved as `caller` may hear of a change: nothing unless this door lists
-   * the action for it, and the job id only when it owns the job (the `jobOwner` hook), or when
-   * `oneParty` says every caller is the same party (an app with no sign-in)
+   * what a subscriber resolved as `caller` hears of a change: `{ action, door }` when this door
+   * lists the action for it, a bare `{ changed: true }` otherwise. The job id only when it owns the
+   * job (the `jobOwner` hook), or when `oneParty` says every caller is the same party (no sign-in)
    */
-  changeFor(change: Change, caller: Caller, oneParty?: boolean): Change | null;
+  changeFor(change: Change, caller: Caller, oneParty?: boolean): Change | BareChange;
+}
+
+/**
+ * what a stream subscriber gets for a change to an action it may not run: that something changed,
+ * so a page showing shared data refetches, and nothing else (no action, subject, result or job)
+ */
+export interface BareChange {
+  changed: true;
 }
 
 /** what a door's run takes besides the call itself */
@@ -623,11 +631,14 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       starts: (name) => byName.get(name)?.long === true,
       changeFor(change, caller, oneParty = false) {
         const def = byName.get(change.action);
-        if (!def || !listsAction(def, caller)) return null;
-        if (change.job === undefined) return change;
+        if (!def || !listsAction(def, caller)) return { changed: true };
+        // built field by field, so nothing a listener added to the change object goes out
+        const full: Change = { action: change.action, door: change.door };
+        if (change.job === undefined) return full;
         const job = jobs.get(change.job);
         const owns = oneParty || (hooks.jobOwner !== undefined && job?.owner === hooks.jobOwner(caller));
-        return owns ? change : { action: change.action, door: change.door };
+        if (owns) full.job = change.job;
+        return full;
       },
       run(name, input, caller, runOptions) {
         const def = byName.get(name);

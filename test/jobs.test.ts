@@ -852,8 +852,8 @@ describe("long actions, after review", () => {
         body: JSON.stringify({ for: as }),
       });
 
-    // with an owner rule: the owner hears the job id; another caller who may roll hears that
-    // something changed, with no id; a caller who may not roll hears nothing
+    // with an owner rule: the owner hears the job id; another caller who may roll hears the
+    // action, with no id; a caller who may not roll hears only that something changed
     const owned = createRegistry(looksApp({ ms: 20 }).actions, { allow, jobOwner: (who: Who) => who.user });
     const app = await serve(doors(owned, { name: "owned", caller }));
     try {
@@ -862,7 +862,11 @@ describe("long actions, after review", () => {
       const heard = await Promise.all(streams.map((s) => s.next(1000)));
       assert.deepEqual(
         heard.map((e) => (e ? JSON.parse(e.data) : null)),
-        [{ action: "look.roll", door: "http", job: id }, { action: "look.roll", door: "http" }, null],
+        [
+          { action: "look.roll", door: "http", job: id },
+          { action: "look.roll", door: "http" },
+          { changed: true },
+        ],
       );
       for (const s of streams) s.close();
     } finally {

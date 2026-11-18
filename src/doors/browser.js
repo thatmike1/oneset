@@ -129,9 +129,11 @@ export function createClient(options = {}) {
   }
 
   /**
-   * calls `fn` after every change: `{ action, door }` for a run, `{ connected: true }` once the
-   * stream is live (right away for a listener added after that), `{ reconnected: true }` when it
-   * comes back after a drop. A listener that keeps fetched state refetches on each of them.
+   * calls `fn` after every change: `{ action, door }` for a run of an action this caller may run,
+   * `{ changed: true }` for one it may not (something it shows may still have changed),
+   * `{ connected: true }` once the stream is live (right away for a listener added after that),
+   * `{ reconnected: true }` when it comes back after a drop. A listener that keeps fetched state
+   * refetches on all of them; one that waits for a particular action refetches on any without one.
    * Returns a function that stops listening.
    */
   function onChange(fn) {

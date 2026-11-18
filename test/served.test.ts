@@ -513,3 +513,29 @@ describe("the browser client during a drop", () => {
     stopSecond();
   });
 });
+
+describe("the browser client and a bare change", () => {
+  test("passes { changed: true } to listeners, a change to an action this caller may not run", async () => {
+    const { createClient } = await import("../src/doors/browser.js");
+    let source: { fire(type: string, data?: string): void } | undefined;
+    class FakeSource {
+      private readonly handlers = new Map<string, ((e: { data: string }) => void)[]>();
+      constructor() {
+        source = this;
+      }
+      addEventListener(type: string, fn: (e: { data: string }) => void) {
+        this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+      }
+      fire(type: string, data = "") {
+        for (const fn of this.handlers.get(type) ?? []) fn({ data });
+      }
+      close() {}
+    }
+    const client = createClient({ url: "http://127.0.0.1:1", EventSource: FakeSource });
+    const heard: unknown[] = [];
+    const stop = client.onChange((change) => heard.push(change));
+    source?.fire("change", '{"changed":true}');
+    assert.deepEqual(heard, [{ changed: true }]);
+    stop();
+  });
+});

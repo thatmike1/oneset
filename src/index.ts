@@ -6,6 +6,7 @@ export type {
   ActionDef,
   ActionsOf,
   AnyAction,
+  BareChange,
   CatalogEntry,
   Change,
   Description,

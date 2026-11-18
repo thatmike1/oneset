@@ -1,10 +1,14 @@
 // types for the browser client (browser.js, served at /actions.js and exported as `oneset/client`)
 
-/** what `onChange` listeners hear */
+/**
+ * what `onChange` listeners hear. Anything without an `action` (a change to an action this caller
+ * may not run, the stream going live, the stream coming back) is a reason to refetch
+ */
 export type ClientChange =
-  | { action: string; door: string; job?: string; connected?: never; reconnected?: never }
-  | { connected: true; action?: never; reconnected?: never }
-  | { reconnected: true; action?: never; connected?: never };
+  | { action: string; door: string; job?: string; changed?: never; connected?: never; reconnected?: never }
+  | { changed: true; action?: never; connected?: never; reconnected?: never }
+  | { connected: true; action?: never; changed?: never; reconnected?: never }
+  | { reconnected: true; action?: never; changed?: never; connected?: never };
 
 /** an action in the catalog, as `actions()` returns it */
 export interface ClientCatalogEntry {

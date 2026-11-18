@@ -178,6 +178,10 @@ client.act("note.later", { n: 2 }).then((out) => out.n.toFixed());
 // @ts-expect-error the typed client knows the names
 client.act("note.gone", {});
 client.onChange((change) => (change.action ? change.door.length : change.connected));
+// a bare change, for an action this caller may not run, says only that something changed
+client.onChange((change) =>
+  change.action === undefined ? change.changed || change.connected || change.reconnected : change.door,
+);
 // { wait: false } returns a job only for a long action; an ordinary one answers its own result
 // @ts-expect-error so the type may not promise a job
 const notJob: Promise<ClientJob> = client.act("note.later", { n: 1 }, { wait: false });
