@@ -579,4 +579,30 @@ describe("long actions, after review", () => {
     const plain = reg.door({ name: "plain" });
     assert.equal(((await plain.run("job.get", { id: started.job.id }, undefined)) as JobView).result, 4);
   });
+
+  test("reading a job when the store is full keeps every result still in its hour", async () => {
+    const reg = createRegistry([
+      defineAction({
+        name: "x.quick",
+        area: "x",
+        summary: "quick",
+        mutates: false,
+        long: true,
+        input: z.object({ n: z.number() }),
+        run: (input) => input.n,
+      }),
+    ]);
+    const door = reg.door({ name: "page" });
+    const ids: string[] = [];
+    for (let n = 0; n < 1000; n++)
+      ids.push((door.run("x.quick", { n }, undefined) as { job: JobView }).job.id);
+    const read = (id: string) => door.run("job.get", { id, wait: 0 }, undefined) as JobView;
+    assert.equal(read(ids[0] as string).result, 0);
+    assert.equal(read(ids[999] as string).result, 999);
+    assert.equal(read(ids[0] as string).result, 0, "a read makes no room");
+    // the 1001st finished job is the actual excess: the oldest finished one goes
+    door.run("x.quick", { n: 1000 }, undefined);
+    assert.throws(() => read(ids[0] as string), /no job/);
+    assert.equal(read(ids[1] as string).result, 1);
+  });
 });

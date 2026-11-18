@@ -75,7 +75,10 @@ export interface Hooks<Caller = any, RunCtx = any, Def = AnyAction> {
    * job whose id it holds
    */
   jobOwner?(caller: Caller): unknown;
-  /** how jobs are kept: `keepMs` after they finish (default an hour), at most `max` (default 1000) */
+  /**
+   * how jobs are kept: `keepMs` after they finish (default an hour), and at most `max` finished
+   * ones (default 1000; the oldest finished goes when one more finishes). Running jobs always stay
+   */
   jobs?: { keepMs?: number; max?: number };
 }
 
@@ -399,25 +402,33 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
   const keepMs = hooks.jobs?.keepMs ?? 60 * 60 * 1000;
   const maxJobs = hooks.jobs?.max ?? 1000;
 
-  /** drops finished jobs past their keep time, then the oldest finished ones over the cap */
-  function sweep(now: number): void {
-    for (const [id, job] of jobs) {
-      if (job.finished !== undefined && now - job.finished >= keepMs) jobs.delete(id);
+  /** finished jobs' ids, oldest finish first */
+  const finishedOrder = new Set<string>();
+
+  /** drops finished jobs past their keep time; reads and starts call it, and it never makes room */
+  function expire(now: number): void {
+    for (const id of finishedOrder) {
+      const job = jobs.get(id);
+      if (job?.finished !== undefined && now - job.finished < keepMs) break;
+      finishedOrder.delete(id);
+      jobs.delete(id);
     }
-    if (jobs.size < maxJobs) return;
-    const finished = [...jobs.values()]
-      .filter((job) => job.finished !== undefined)
-      .sort((a, b) => (a.finished ?? 0) - (b.finished ?? 0));
-    for (const job of finished) {
-      if (jobs.size < maxJobs) break;
-      jobs.delete(job.id);
+  }
+
+  /** a job finished: it joins the finished ones, and only an actual excess drops the oldest */
+  function finished(job: Job): void {
+    finishedOrder.add(job.id);
+    for (const id of finishedOrder) {
+      if (finishedOrder.size <= maxJobs) break;
+      finishedOrder.delete(id);
+      jobs.delete(id);
     }
   }
 
   /** starts a long action's run as a job: allow and validation already answered */
   function startJob(def: AnyAction, data: Record<string, unknown>, caller: unknown, door: string): Job {
     const now = Date.now();
-    sweep(now);
+    expire(now);
     let settle = () => {};
     const job: Job = {
       id: globalThis.crypto.randomUUID(),
@@ -434,12 +445,14 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       job.state = "done";
       job.value = value;
       job.finished = Date.now();
+      finished(job);
       settle();
     };
     const fail = (err: unknown) => {
       job.state = "failed";
       job.error = jobError(err);
       job.finished = Date.now();
+      finished(job);
       settle();
     };
     try {
@@ -497,7 +510,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     render: (def: AnyAction, outcome: unknown) => unknown = (_def, outcome) => outcome,
   ): unknown {
     const { id, wait = JOB_WAIT_DEFAULT } = validate(jobDef as AnyAction, input) as z.output<typeof jobInput>;
-    sweep(Date.now());
+    expire(Date.now());
     const job = jobs.get(id);
     const readable =
       job !== undefined &&
