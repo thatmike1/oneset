@@ -2,7 +2,7 @@
 // over HTTP, the official SDK's MCP client, the served CLI and the browser client
 import assert from "node:assert/strict";
 import { type ChildProcess, execFile, execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -115,4 +115,13 @@ test("the notes example answers over HTTP, MCP, the CLI and the browser client",
   } finally {
     stop();
   }
+});
+
+test("the README carries the example whole, since the package does not ship it", () => {
+  const example = readFileSync(join(root, "examples/notes/server.mjs"), "utf8");
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  assert.ok(
+    readme.includes(`\`\`\`js\n${example}\`\`\`\n`),
+    "README's example differs from examples/notes/server.mjs",
+  );
 });
