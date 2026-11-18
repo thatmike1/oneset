@@ -672,6 +672,57 @@ describe("raw malformed requests", () => {
     }
   });
 
+  test("a mounted door checks the request itself before it resolves the caller", async () => {
+    let resolved = 0;
+    const keyed = await serve(
+      doors(notesRegistry(), {
+        name: "notes",
+        caller: (req) => {
+          resolved++;
+          if (req.headers.authorization !== "Bearer key") {
+            throw new ActionError(401, "no_key", "send a key", {
+              headers: { "www-authenticate": 'Bearer realm="agents"' },
+            });
+          }
+          return { user: "mike" };
+        },
+      }),
+    );
+    const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+    const send = (opts: { method?: string; headers?: Record<string, string>; body?: string }) =>
+      raw(keyed.port, {
+        method: opts.method ?? "POST",
+        path: "/mcp",
+        headers: { "content-type": "application/json", accept: ACCEPT, ...opts.headers },
+        ...(opts.body !== undefined ? { body: opts.body } : {}),
+      });
+    try {
+      const refused = [
+        await send({ method: "GET" }),
+        await send({ body: ping, headers: { accept: "application/json" } }),
+        await send({ body: ping, headers: { "content-type": "text/plain" } }),
+        await send({ body: ping, headers: { "mcp-protocol-version": "1999-01-01" } }),
+        await send({ body: "{nope" }),
+        await send({ body: `[${ping}]` }),
+        await send({ body: '{"jsonrpc":"1.0"}' }),
+      ];
+      assert.deepEqual(
+        refused.map((r) => r.status),
+        [405, 406, 415, 400, 400, 400, 400],
+      );
+      assert.equal(resolved, 0, "no malformed request reached the caller resolver");
+      const unsigned = await send({ body: ping });
+      assert.equal(unsigned.status, 401);
+      assert.equal(unsigned.headers["www-authenticate"], 'Bearer realm="agents"');
+      assert.equal(unsigned.json().error.code, "no_key");
+      const signed = await send({ body: ping, headers: { authorization: "Bearer key" } });
+      assert.deepEqual(signed.json(), { jsonrpc: "2.0", id: 1, result: {} });
+      assert.equal(resolved, 2);
+    } finally {
+      await keyed.close();
+    }
+  });
+
   test("the guard still applies in front of it, answering in MCP's error shape", async () => {
     for (const headers of [
       { origin: "https://evil.example" },

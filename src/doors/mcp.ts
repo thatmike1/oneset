@@ -37,7 +37,25 @@ export type McpHandler<Caller = any> = ((
 ) => Promise<void>) & {
   /** the door underneath, for its catalog (the skill lists its tools) */
   door: Door<any, Caller>;
+  /**
+   * the same, with the caller resolved only once the request passed the transport checks (method,
+   * Accept, Content-Type, protocol version, body). What `resolve` throws is rethrown to the app
+   */
+  resolving(
+    req: IncomingMessage,
+    res: ServerResponse,
+    resolve: () => Caller | Promise<Caller>,
+    body?: unknown,
+  ): Promise<void>;
 };
+
+/** carries a caller resolver's own error past the door's error handling, back to the app */
+class CallerFailed {
+  readonly error: unknown;
+  constructor(error: unknown) {
+    this.error = error;
+  }
+}
 
 type Id = string | number;
 interface Message {
@@ -331,7 +349,12 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     }
   }
 
-  const handle = async (req: IncomingMessage, res: ServerResponse, caller: unknown, body?: unknown) => {
+  const resolving = async (
+    req: IncomingMessage,
+    res: ServerResponse,
+    resolve: () => unknown,
+    body?: unknown,
+  ): Promise<void> => {
     try {
       guard.check(req);
     } catch (err) {
@@ -376,6 +399,12 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
         );
       }
       if (!isMessage(msg)) throw new RpcError(400, -32600, "Invalid Request: not a JSON-RPC 2.0 message");
+      let caller: unknown;
+      try {
+        caller = await resolve();
+      } catch (err) {
+        throw new CallerFailed(err);
+      }
       // notifications and responses are accepted with no body
       if (msg.method === undefined || msg.id === undefined) {
         res.writeHead(202);
@@ -398,6 +427,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       }
       sendRpc(res, 200, reply);
     } catch (err) {
+      if (err instanceof CallerFailed) throw err.error;
       if (err instanceof RpcError) {
         sendRpc(
           res,
@@ -411,5 +441,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       sendRpc(res, 500, { jsonrpc: "2.0", error: { code: -32603, message: "Internal error" }, id: null });
     }
   };
-  return Object.assign(handle, { door: tools });
+  const handle = (req: IncomingMessage, res: ServerResponse, caller: unknown, body?: unknown) =>
+    resolving(req, res, () => caller, body);
+  return Object.assign(handle, { door: tools, resolving });
 }

@@ -181,7 +181,8 @@ export function doors<R extends Registry<any, any, any, any, any>>(
         return true;
       }
       if (r.kind === "mcp") {
-        await mcpHandle(req, res, await resolve(req, "mcp"));
+        // the caller is resolved after the request passes MCP's own checks, as HTTP reads its body first
+        await mcpHandle.resolving(req, res, () => resolve(req, "mcp"));
         return true;
       }
       if (!r.methods.includes(method) || (r.kind === "run" && method !== "POST")) {
