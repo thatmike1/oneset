@@ -657,4 +657,37 @@ describe("long actions, after review", () => {
       await app.close();
     }
   });
+
+  test("a change listener that reads the announced job finds it finished", async () => {
+    const reg = createRegistry([
+      defineAction({
+        name: "x.sync",
+        area: "x",
+        summary: "sync",
+        mutates: true,
+        long: true,
+        input: z.object({}),
+        run: () => 1,
+      }),
+      defineAction({
+        name: "x.async",
+        area: "x",
+        summary: "async",
+        mutates: true,
+        long: true,
+        input: z.object({}),
+        run: async () => 2,
+      }),
+    ]);
+    const door = reg.door({ name: "page" });
+    const states: string[] = [];
+    reg.onChange((change) => {
+      states.push((door.run("job.get", { id: change.job, wait: 0 }, undefined) as JobView).state);
+    });
+    door.run("x.sync", {}, undefined);
+    const { job } = door.run("x.async", {}, undefined) as { job: JobView };
+    await door.run("job.get", { id: job.id }, undefined);
+    await sleep(10);
+    assert.deepEqual(states, ["done", "done"]);
+  });
 });

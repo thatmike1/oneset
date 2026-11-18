@@ -372,12 +372,16 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     return parsed.data as Record<string, unknown>;
   }
 
-  /** around and the handler, then the change event, for validated input allow already passed */
+  /**
+   * around and the handler, then the change event, for validated input allow already passed. A
+   * job announces its own change once its finished state is set (`announce: false` here)
+   */
   function execute(
     def: AnyAction,
     data: Record<string, unknown>,
     caller: unknown,
     info?: Partial<RunInfo>,
+    announce = true,
   ): unknown {
     const runInfo: RunInfo = { nested: info?.nested ?? false, door: info?.door ?? "direct" };
     if (info?.job !== undefined) runInfo.job = info.job;
@@ -385,7 +389,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       ? hooks.around(def, data, caller, (i, ctx) => def.run(i, ctx), runInfo)
       : def.run(data, caller);
     // the listeners are looked at when the run finishes, not now: a page may subscribe meanwhile
-    if (!def.mutates || runInfo.nested) return out;
+    if (!def.mutates || runInfo.nested || !announce) return out;
     const change: Change = { action: def.name, door: runInfo.door };
     if (runInfo.job !== undefined) change.job = runInfo.job;
     if (isThenable(out)) {
@@ -447,6 +451,8 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       job.finished = Date.now();
       finished(job);
       settle();
+      // after the state is set, so a listener that reads the job finds it done
+      if (def.mutates) emit({ action: def.name, door, job: job.id });
     };
     const fail = (err: unknown) => {
       job.state = "failed";
@@ -456,7 +462,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       settle();
     };
     try {
-      const out = execute(def, data, caller, { door, job: job.id });
+      const out = execute(def, data, caller, { door, job: job.id }, false);
       if (isThenable(out)) Promise.resolve(out).then(succeed, fail);
       else succeed(out);
     } catch (err) {
