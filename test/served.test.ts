@@ -422,3 +422,35 @@ describe("base and url", () => {
     }
   });
 });
+
+describe("a null error body", () => {
+  test("the browser client and the CLI fall back to the HTTP status instead of a TypeError", async () => {
+    const reg = createRegistry([
+      defineAction({
+        name: "note.gone",
+        area: "notes",
+        summary: "always 409 with a null body",
+        mutates: false,
+        input: z.object({}),
+        run: () => {
+          throw new ActionError(409, "no_note", "no note", { body: null });
+        },
+      }),
+    ]);
+    const app = await serve(doors(reg, { name: "nulls" }));
+    try {
+      const { createClient } = await import("../src/doors/browser.js");
+      await assert.rejects(createClient({ url: app.url }).act("note.gone"), (err: unknown) => {
+        const e = err as { name: string; status: number; code: string };
+        return e.name === "ActionError" && e.status === 409 && e.code === "http";
+      });
+      const file = join(dir, "nulls.mjs");
+      writeFileSync(file, (await raw(app.port, { path: "/cli/nulls.mjs" })).text);
+      const out = await cli(file, ["note.gone"]);
+      assert.equal(out.code, 1);
+      assert.equal(out.stderr, "409: request failed\n");
+    } finally {
+      await app.close();
+    }
+  });
+});

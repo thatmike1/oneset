@@ -41,7 +41,8 @@ export function createClient(options = {}) {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const error = data.error ?? {};
+      // an error body may be anything the app chose, null included
+      const error = data?.error ?? {};
       throw new ActionError(
         res.status,
         error.code ?? "http",
@@ -58,7 +59,7 @@ export function createClient(options = {}) {
    */
   async function act(name, input = {}, options = {}) {
     const data = await request("POST", `/api/actions/${encodeURIComponent(name)}`, input);
-    if (!data.job) return data.result;
+    if (!data?.job) return data?.result;
     if (options.wait === false) return data.job;
     // the start's answer carries no result, so the job is read at least once
     const { id } = data.job;

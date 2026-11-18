@@ -49,7 +49,8 @@ async function call(cfg, method, path, body) {
     die(`cannot reach ${cfg.url}: ${err.cause?.code ?? err.message}`);
   }
   const data = await res.json().catch(() => ({ error: { message: `HTTP ${res.status}` } }));
-  if (!res.ok) die(`${data.error?.code ?? res.status}: ${data.error?.message ?? "request failed"}`);
+  // an error body may be anything the app chose, null included
+  if (!res.ok) die(`${data?.error?.code ?? res.status}: ${data?.error?.message ?? "request failed"}`);
   return data;
 }
 
