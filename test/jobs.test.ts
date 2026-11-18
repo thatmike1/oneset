@@ -690,4 +690,53 @@ describe("long actions, after review", () => {
     await sleep(10);
     assert.deepEqual(states, ["done", "done"]);
   });
+
+  test("a job reader that disconnects stops waiting on the server", async () => {
+    const gates = new Map([["held", gate()]]);
+    const reg = createRegistry(looksApp({ gates }).actions);
+    const app = await serve(doors(reg, { name: "readers" }));
+    const created = new Set<unknown>();
+    const cleared = new Set<unknown>();
+    const realSet = globalThis.setTimeout;
+    const realClear = globalThis.clearTimeout;
+    // count only the read's own timer, by its unusual length
+    globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+      const handle = realSet(fn, ms);
+      if (ms === 4321) created.add(handle);
+      return handle;
+    }) as typeof setTimeout;
+    globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+      if (created.has(handle)) cleared.add(handle);
+      realClear(handle);
+    }) as typeof clearTimeout;
+    try {
+      const start = await fetch(`${app.url}/api/actions/look.roll`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ for: "held" }),
+      });
+      const { id } = ((await start.json()) as { job: JobView }).job;
+      const controller = new AbortController();
+      const read = fetch(`${app.url}/api/actions/job.get`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ id, wait: 4.321 }),
+        signal: controller.signal,
+      });
+      await sleep(100);
+      controller.abort();
+      await assert.rejects(read, /abort/i);
+      await sleep(100);
+      assert.equal(created.size, 1);
+      assert.equal(cleared.size, 1, "the server let go of the read when its client left");
+      // the job itself goes on
+      gates.get("held")?.open();
+      const done = (await reg.door({ name: "check" }).run("job.get", { id }, undefined)) as JobView;
+      assert.equal(done.state, "done");
+    } finally {
+      globalThis.setTimeout = realSet;
+      globalThis.clearTimeout = realClear;
+      await app.close();
+    }
+  });
 });

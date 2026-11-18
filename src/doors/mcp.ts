@@ -310,7 +310,11 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
   // the kit's guidance for long actions goes after the app's own
   const guide = jobDef ? [instructions, LONG_GUIDE].filter(Boolean).join("\n\n") : instructions;
 
-  async function callTool(params: Record<string, unknown>, caller: unknown): Promise<unknown> {
+  async function callTool(
+    params: Record<string, unknown>,
+    caller: unknown,
+    signal: AbortSignal,
+  ): Promise<unknown> {
     const tool = params.name;
     if (typeof tool !== "string") throw invalidParams("tools/call needs a tool name");
     if ("arguments" in params && !isObject(params.arguments)) {
@@ -321,7 +325,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     const def = byTool.get(tool);
     try {
       if (!def) throw (reg as Registry).unknown(tool);
-      const rendered = await tools.run(def.name, args, caller);
+      const rendered = await tools.run(def.name, args, caller, { signal });
       if (tools.starts(def.name)) {
         const { job } = rendered as { job: { id: string } };
         const next =
@@ -342,7 +346,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     }
   }
 
-  async function answer(msg: Message, caller: unknown): Promise<unknown> {
+  async function answer(msg: Message, caller: unknown, signal: AbortSignal): Promise<unknown> {
     if (!METHODS.has(msg.method ?? "")) throw new RpcError(200, -32601, `Method not found: ${msg.method}`);
     // every MCP method takes named params: an object or nothing
     if (msg.params !== undefined && !isObject(msg.params)) throw invalidParams("params must be an object");
@@ -368,7 +372,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       case "tools/list":
         return { tools: mcpTools(tools, caller) };
       case "tools/call":
-        return callTool(params, caller);
+        return callTool(params, caller, signal);
       default:
         throw new RpcError(200, -32601, `Method not found: ${msg.method}`);
     }
@@ -438,7 +442,10 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       }
       let reply: Record<string, unknown>;
       try {
-        reply = { jsonrpc: "2.0", id: msg.id, result: await answer(msg, caller) };
+        // a client that leaves stops a waiting job_get
+        const left = new AbortController();
+        res.on("close", () => left.abort());
+        reply = { jsonrpc: "2.0", id: msg.id, result: await answer(msg, caller, left.signal) };
       } catch (err) {
         if (!(err instanceof RpcError)) console.error("oneset: an MCP request failed", err);
         reply = {

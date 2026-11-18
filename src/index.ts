@@ -11,6 +11,7 @@ export type {
   Description,
   Door,
   DoorOptions,
+  DoorRunOptions,
   Draft,
   Hooks,
   JobView,

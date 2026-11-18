@@ -136,9 +136,15 @@ export interface Door<Def = AnyAction, Caller = any> {
    * runs a listed action and renders its outcome; refuses a name it does not list. A long action
    * answers `{ job }` at once instead (see `starts`)
    */
-  run(name: string, input: unknown, caller: Caller): unknown;
+  run(name: string, input: unknown, caller: Caller, options?: DoorRunOptions): unknown;
   /** whether `run` answers this action with a job instead of its outcome */
   starts(name: string): boolean;
+}
+
+/** what a door's run takes besides the call itself */
+export interface DoorRunOptions {
+  /** aborted when the request went away: a waiting job.get stops waiting (the job goes on) */
+  signal?: AbortSignal;
 }
 
 /** a job as `job.get` and a long action's start answer it */
@@ -246,8 +252,8 @@ interface Job {
   finished?: number;
   value?: unknown;
   error?: NonNullable<JobView["error"]>;
-  /** settles when the job finishes, either way */
-  done: Promise<void>;
+  /** readers waiting for it to finish; each removes itself when it stops waiting */
+  waiters: Set<() => void>;
 }
 
 /** what a job's run threw, as a door renders an error; anything else is logged and becomes internal */
@@ -433,18 +439,18 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
   function startJob(def: AnyAction, data: Record<string, unknown>, caller: unknown, door: string): Job {
     const now = Date.now();
     expire(now);
-    let settle = () => {};
     const job: Job = {
       id: globalThis.crypto.randomUUID(),
       def,
       owner: hooks.jobOwner ? hooks.jobOwner(caller) : undefined,
       state: "running",
       started: now,
-      done: new Promise<void>((resolve) => {
-        settle = resolve;
-      }),
+      waiters: new Set(),
     };
     jobs.set(job.id, job);
+    const settle = () => {
+      for (const wake of [...job.waiters]) wake();
+    };
     const succeed = (value: unknown) => {
       job.state = "done";
       job.value = value;
@@ -514,6 +520,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     caller: unknown,
     listedHere: (def: AnyAction) => boolean = () => true,
     render: (def: AnyAction, outcome: unknown) => unknown = (_def, outcome) => outcome,
+    signal?: AbortSignal,
   ): unknown {
     const { id, wait = JOB_WAIT_DEFAULT } = validate(jobDef as AnyAction, input) as z.output<typeof jobInput>;
     expire(Date.now());
@@ -530,15 +537,20 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
         `no job ${id} here: jobs are kept in memory for a while after they finish and are lost when the app restarts`,
       );
     }
-    if (job.state !== "running" || wait === 0) return viewOf(job, render);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const waited = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, wait * 1000);
-    });
-    return Promise.race([job.done, waited]).then(() => {
-      clearTimeout(timer);
-      return viewOf(job, render);
-    });
+    if (job.state !== "running" || wait === 0 || signal?.aborted) return viewOf(job, render);
+    // the wait ends when the job finishes, the time is up or the reader goes away, whichever is
+    // first; the job itself never depends on a reader
+    return new Promise<void>((resolve) => {
+      const stop = () => {
+        clearTimeout(timer);
+        job.waiters.delete(stop);
+        signal?.removeEventListener("abort", stop);
+        resolve();
+      };
+      const timer = setTimeout(stop, wait * 1000);
+      job.waiters.add(stop);
+      signal?.addEventListener("abort", stop, { once: true });
+    }).then(() => viewOf(job, render));
   }
 
   function allows(def: AnyAction, caller: unknown): boolean {
@@ -592,11 +604,11 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
           inputSchema: inputSchema(def),
         })),
       starts: (name) => byName.get(name)?.long === true,
-      run(name, input, caller) {
+      run(name, input, caller, runOptions) {
         const def = byName.get(name);
         if (!def) throw problem({ kind: "unknown_action", name });
         if (isJobDef(def)) {
-          return readJob(input, caller, (d) => listsAction(d, caller), render);
+          return readJob(input, caller, (d) => listsAction(d, caller), render, runOptions?.signal);
         }
         // allow runs once: its own error is what the caller gets, and only then the door's list rule
         authorize(def, caller);
