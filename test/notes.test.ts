@@ -185,6 +185,39 @@ describe("hooks", () => {
     assert.deepEqual(reg.run("note.add", { text: "a" }, { owner: true }), { id: 1, text: "a" });
   });
 
+  test("an allow that returns a promise refuses instead of letting the run start", async () => {
+    let ran = 0;
+    let refused = 0;
+    const reg = createRegistry(
+      [
+        defineAction({
+          name: "x.add",
+          area: "x",
+          summary: "add",
+          mutates: true,
+          input: z.object({}),
+          run: () => {
+            ran++;
+            return "ran";
+          },
+        }),
+      ],
+      {
+        // an async lookup: the refusal arrives a tick later, after a sync chain would have run
+        allow: (async () => {
+          refused++;
+          throw new ActionError(403, "no", "refused");
+        }) as never,
+      },
+    );
+    assert.throws(() => reg.run("x.add", {}, undefined), /allow returned a promise/);
+    assert.equal(reg.allows(reg.get("x.add")!, undefined), false);
+    assert.deepEqual(reg.door({ name: "d" }).catalog(undefined), []);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(ran, 0);
+    assert.ok(refused > 0);
+  });
+
   test("schema sets what is validated, so a field the hook adds reaches around", () => {
     let aroundInput: unknown;
     let handlerInput: unknown;

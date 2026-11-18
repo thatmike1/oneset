@@ -43,8 +43,11 @@ export type KitProblem<Def = AnyAction> =
 export interface Hooks<Caller = any, RunCtx = any, Def = AnyAction> {
   /** the input the doors show and validate; by default the definition's own */
   schema?(def: Def): z.ZodObject;
-  /** returns nothing, or throws the app's own error */
-  allow?(def: Def, caller: Caller): void;
+  /**
+   * returns nothing, or throws the app's own error. It decides synchronously: one that returns a
+   * promise refuses every call (resolve async facts in the caller resolver)
+   */
+  allow?(def: Def, caller: Caller): undefined;
   /**
    * wraps the handler: `next(input, ctx)` runs it. May change the input, build the context,
    * call `next` more than once and return something other than the handler's result
@@ -222,11 +225,31 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     }
   };
 
+  /**
+   * calls allow once. It must decide synchronously: a promise it returns is a refusal that would
+   * arrive after the run had started, so the kit refuses the call instead and drops the promise
+   */
+  function authorize(def: AnyAction, caller: unknown): void {
+    const out: unknown = hooks.allow?.(def, caller);
+    if (isThenable(out)) {
+      Promise.resolve(out).catch(() => {});
+      throw new Error(
+        `oneset: allow returned a promise for ${def.name}; it must throw or return synchronously ` +
+          "(resolve what it needs in the caller resolver instead)",
+      );
+    }
+  }
+
   function run(name: string, input: unknown, caller: unknown, info?: Partial<RunInfo>): unknown {
     const def = byName.get(name);
     if (!def) throw problem({ kind: "unknown_action", name });
+    authorize(def, caller);
+    return runAllowed(def, input, caller, info);
+  }
+
+  /** validation, around and the handler, for a call allow already passed */
+  function runAllowed(def: AnyAction, input: unknown, caller: unknown, info?: Partial<RunInfo>): unknown {
     const runInfo: RunInfo = { nested: info?.nested ?? false, door: info?.door ?? "direct" };
-    hooks.allow?.(def, caller);
     const parsed = schemaOf(def).safeParse(input ?? {});
     if (!parsed.success) throw problem({ kind: "invalid_input", def, error: parsed.error });
     const data = parsed.data as Record<string, unknown>;
@@ -248,7 +271,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
   function allows(def: AnyAction, caller: unknown): boolean {
     if (!hooks.allow) return true;
     try {
-      hooks.allow(def, caller);
+      authorize(def, caller);
       return true;
     } catch {
       return false;
@@ -296,7 +319,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
         if (!def) throw problem({ kind: "unknown_action", name });
         if (!lists(def, caller)) {
           // allow's own error is what the caller gets when it applies
-          hooks.allow?.(def, caller);
+          authorize(def, caller);
           throw new ActionError(403, "not_listed", `${name} is not available through ${options.name}`);
         }
         const out = run(name, input, caller, { door: options.name });
