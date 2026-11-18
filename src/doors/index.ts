@@ -1,7 +1,7 @@
 // the doors: one mount on the app's own node:http server that serves the HTTP API, MCP, the
 // CLI, the skill, the browser client, the change stream and the setup page, behind the guard
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { AnyAction, DoorOptions, Registry } from "../core.ts";
+import type { AnyAction, Change, DoorOptions, Registry } from "../core.ts";
 import { ActionError } from "../errors.ts";
 import { type AppInfo, browserSource, cliSource, setupPage, skillMarkdown, slugOf } from "./files.ts";
 import { createGuard, type GuardOptions, isLoopback } from "./guard.ts";
@@ -47,6 +47,13 @@ interface BaseOptions<Def, Caller> extends GuardOptions {
   url?: string;
   /** a non-loopback host with no `caller` refuses to start unless this is set */
   openWithoutSignIn?: boolean;
+  /**
+   * whether a stream subscriber hears a change at all, for an app whose one stream serves parties
+   * that must not learn of each other's changes (tenants). It sees the change, the subscriber's
+   * caller and the caller whose run made it. Default: every subscriber, with a bare event for an
+   * action it may not run. A hook that throws counts as false, and is logged
+   */
+  hears?(change: Change, subscriber: Caller, by: Caller): boolean;
   /** options for the HTTP door: `list`, `describe`, `render`, `draft` */
   http?: DoorSettings<Def, Caller>;
   /** options for the MCP door: `list`, `describe`, `render`, `draft` (default draft-7), `version` (the top-level one wins) */
@@ -216,7 +223,19 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           // each subscriber hears what its caller may know: the http door's listing, and a job
           // id only for its owner (with no sign-in, everyone is the one person)
           const caller = await resolve(req, "stream");
-          openStream(registry, req, res, (change) => http.changeFor(change, caller, !opts.caller));
+          openStream(registry, req, res, (change, from) => {
+            if (opts.hears) {
+              // an app with several parties on one stream narrows who hears a change at all
+              let heard = false;
+              try {
+                heard = opts.hears(change, caller, from.caller) === true;
+              } catch (err) {
+                console.error("oneset: the hears hook failed, so this subscriber hears nothing", err);
+              }
+              if (!heard) return null;
+            }
+            return http.changeFor(change, caller, !opts.caller);
+          });
           break;
         }
         case "skill": {

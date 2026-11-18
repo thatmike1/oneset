@@ -201,4 +201,51 @@ describe("the change stream for a signed-in app", () => {
       await app.close();
     }
   });
+
+  test("the hears hook keeps a tenant's changes, bare ones included, to its own subscribers", async () => {
+    const tenants: Record<string, Who & { tenant: string }> = {
+      "Bearer a-editor": { user: "a-editor", edits: true, tenant: "a" },
+      "Bearer a-viewer": { user: "a-viewer", edits: false, tenant: "a" },
+      "Bearer b-viewer": { user: "b-viewer", edits: false, tenant: "b" },
+      "Bearer broken": { user: "broken", edits: false, tenant: "x" },
+    };
+    const seen: unknown[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => seen.push(args);
+    const app = await serve(
+      doors(await rowsApp(), {
+        name: "tenants",
+        caller: (req) => {
+          const who = tenants[req.headers.authorization ?? ""];
+          if (!who) throw new Error("not signed in");
+          return who;
+        },
+        hears: (change, subscriber: Who & { tenant: string }, by: Who & { tenant: string }) => {
+          if (subscriber.tenant === "x") throw new Error("hook broke");
+          return change.action === "row.add" && subscriber.tenant === by.tenant;
+        },
+      }),
+    );
+    try {
+      const open = (as: string) =>
+        openEvents(`${app.url}/api/actions/stream`, { authorization: `Bearer ${as}` });
+      const [editor, viewerA, viewerB, broken] = [
+        await open("a-editor"),
+        await open("a-viewer"),
+        await open("b-viewer"),
+        await open("broken"),
+      ];
+      await request(app, "row.add", { text: "a row" }, "a-editor");
+      const got = await Promise.all([editor, viewerA, viewerB, broken].map((s) => s?.next(500)));
+      assert.deepEqual(
+        got.map((e) => (e ? JSON.parse(e.data) : null)),
+        [{ action: "row.add", door: "http" }, { changed: true }, null, null],
+      );
+      assert.equal(seen.length, 1, "a hook that throws is logged and the subscriber hears nothing");
+      for (const s of [editor, viewerA, viewerB, broken]) s?.close();
+    } finally {
+      console.error = original;
+      await app.close();
+    }
+  });
 });

@@ -9,6 +9,7 @@ export type {
   BareChange,
   CatalogEntry,
   Change,
+  ChangeSource,
   Description,
   Door,
   DoorOptions,

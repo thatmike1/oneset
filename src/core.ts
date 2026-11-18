@@ -179,6 +179,11 @@ export interface JobView {
   error?: { status: number; code: string; message: string; issues?: unknown; body?: unknown };
 }
 
+/** who made a change: the caller of the run, for a listener that scopes who hears it */
+export interface ChangeSource<Caller = any> {
+  caller: Caller;
+}
+
 /** what change listeners hear after a mutating run succeeds at the outermost level */
 export interface Change {
   action: string;
@@ -220,10 +225,11 @@ export interface Registry<
   /** the error for a name no action has, after the app's `error` hook, as a run would throw it */
   unknown(name: string): Error;
   /**
-   * hears every successful outermost mutating run, async ones once they resolve. A listener that
-   * throws or rejects is logged and never breaks the run or the other listeners
+   * hears every successful outermost mutating run, async ones once they resolve, with the caller
+   * whose run made the change. A listener that throws or rejects is logged and never breaks the
+   * run or the other listeners
    */
-  onChange(listener: (change: Change) => unknown): () => void;
+  onChange(listener: (change: Change, from: ChangeSource<Caller>) => unknown): () => void;
 }
 
 /** what a client needs: every action's input and its awaited output, by name */
@@ -354,13 +360,13 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
   };
   const problem = (p: KitProblem<AnyAction>): Error => (hooks.error ?? defaultProblem)(p);
 
-  const listeners = new Set<(change: Change) => unknown>();
-  const emit = (change: Change): void => {
+  const listeners = new Set<(change: Change, from: ChangeSource) => unknown>();
+  const emit = (change: Change, caller: unknown): void => {
     const failed = (err: unknown) => console.error("oneset: a change listener failed", err);
     for (const fn of listeners) {
       try {
         // an async listener's rejection is caught too, without waiting for it
-        const out: unknown = fn(change);
+        const out: unknown = fn(change, { caller });
         if (isThenable(out)) Promise.resolve(out).catch(failed);
       } catch (err) {
         failed(err);
@@ -424,11 +430,11 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     const change: Change = { action: def.name, door: runInfo.door };
     if (isThenable(out)) {
       return Promise.resolve(out).then((value) => {
-        if (!control.skipped) emit(change);
+        if (!control.skipped) emit(change, caller);
         return value;
       });
     }
-    if (!control.skipped) emit(change);
+    if (!control.skipped) emit(change, caller);
     return out;
   }
 
@@ -483,7 +489,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       finished(job);
       settle();
       // after the state is set, so a listener that reads the job finds it done
-      if (def.mutates && !control.skipped) emit({ action: def.name, door, job: job.id });
+      if (def.mutates && !control.skipped) emit({ action: def.name, door, job: job.id }, caller);
     };
     const fail = (err: unknown) => {
       job.state = "failed";
