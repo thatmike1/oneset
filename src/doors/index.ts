@@ -207,12 +207,14 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           break;
         }
         case "run": {
+          // a reader that leaves stops a waiting job.get; nothing else listens to it. Listening
+          // starts before the body and the caller are awaited, so a client gone by then counts too
+          const left = new AbortController();
+          res.on("close", () => left.abort());
+          if (res.destroyed) left.abort();
           const name = decodeAction(r.action ?? "");
           const input = await guard.readJson(req);
           const caller = await resolve(req, "http");
-          // a reader that leaves stops a waiting job.get; nothing else listens to it
-          const left = new AbortController();
-          res.on("close", () => left.abort());
           const result = await http.run(name, input, caller, { signal: left.signal });
           // a long action's start: 202 Accepted with { job }, read with job.get
           if (http.starts(name)) sendJson(res, 202, result);

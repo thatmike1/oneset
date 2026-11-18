@@ -392,6 +392,11 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       sendRefusal(res, err as { status: number; message: string });
       return;
     }
+    // a client that leaves stops a waiting job_get. Listening starts before the body and the
+    // caller are awaited, so a client gone by then counts too
+    const left = new AbortController();
+    res.on("close", () => left.abort());
+    if (res.destroyed) left.abort();
     try {
       if (req.method !== "POST") {
         throw new RpcError(405, -32000, "Method not allowed.", { allow: "POST" });
@@ -444,9 +449,6 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       }
       let reply: Record<string, unknown>;
       try {
-        // a client that leaves stops a waiting job_get
-        const left = new AbortController();
-        res.on("close", () => left.abort());
         reply = { jsonrpc: "2.0", id: msg.id, result: await answer(msg, caller, left.signal) };
       } catch (err) {
         if (!(err instanceof RpcError)) console.error("oneset: an MCP request failed", err);

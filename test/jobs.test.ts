@@ -886,4 +886,85 @@ describe("long actions, after review", () => {
       await app2.close();
     }
   });
+
+  test("a read cancelled while its caller is still being resolved never starts waiting", async () => {
+    for (const via of ["http", "mcp"] as const) {
+      const gates = new Map([["held", gate()]]);
+      const reg = createRegistry(looksApp({ gates }).actions);
+      let resolving = gate();
+      let release = gate();
+      const app = await serve(
+        doors(reg, {
+          name: "late-abort",
+          caller: async (req) => {
+            if (req.headers["x-hold"]) {
+              resolving.open();
+              await release.opened;
+            }
+            return {};
+          },
+        }),
+      );
+      const armed: unknown[] = [];
+      const cleared: unknown[] = [];
+      const realSet = globalThis.setTimeout;
+      const realClear = globalThis.clearTimeout;
+      globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+        const handle = realSet(fn, ms);
+        if (ms === 4323) armed.push(handle);
+        return handle;
+      }) as typeof setTimeout;
+      globalThis.clearTimeout = ((handle: ReturnType<typeof setTimeout>) => {
+        if (armed.includes(handle)) cleared.push(handle);
+        realClear(handle);
+      }) as typeof clearTimeout;
+      try {
+        const start = await raw(app.port, {
+          method: "POST",
+          path: "/api/actions/look.roll",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ for: "held" }),
+        });
+        const { id } = start.json().job as JobView;
+        resolving = gate();
+        release = gate();
+        const controller = new AbortController();
+        const read =
+          via === "http"
+            ? fetch(`${app.url}/api/actions/job.get`, {
+                method: "POST",
+                headers: { "content-type": "application/json", "x-hold": "1" },
+                body: JSON.stringify({ id, wait: 4.323 }),
+                signal: controller.signal,
+              })
+            : fetch(`${app.url}/mcp`, {
+                method: "POST",
+                headers: {
+                  "content-type": "application/json",
+                  accept: "application/json, text/event-stream",
+                  "x-hold": "1",
+                },
+                body: JSON.stringify({
+                  jsonrpc: "2.0",
+                  id: 1,
+                  method: "tools/call",
+                  params: { name: "job_get", arguments: { id, wait: 4.323 } },
+                }),
+                signal: controller.signal,
+              });
+        await resolving.opened;
+        controller.abort();
+        await assert.rejects(read, /abort/i);
+        await sleep(100);
+        release.open();
+        await sleep(100);
+        assert.equal(armed.length - cleared.length, 0, `${via}: no read timer left armed`);
+      } finally {
+        globalThis.setTimeout = realSet;
+        globalThis.clearTimeout = realClear;
+        gates.get("held")?.open();
+        await app.close();
+      }
+    }
+  });
 });
