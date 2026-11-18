@@ -527,4 +527,29 @@ describe("long actions, after review", () => {
     await out;
     assert.deepEqual(heard, [{ action: "x.add", door: "direct" }]);
   });
+
+  test("a job read awaits an async renderer", async () => {
+    const reg = createRegistry(looksApp({ ms: 1 }).actions);
+    const app = await serve(
+      doors(reg, {
+        name: "async-render",
+        http: { render: async (_def, out) => `rendered ${JSON.stringify(out)}` },
+      }),
+    );
+    try {
+      const post = (path: string, body: unknown) =>
+        raw(app.port, {
+          method: "POST",
+          path,
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const { id } = (await post("/api/actions/look.roll", { for: "r" })).json().job as JobView;
+      const read = await post("/api/actions/job.get", { id });
+      assert.equal(read.json().result.state, "done");
+      assert.equal(read.json().result.result, 'rendered {"looks":6,"for":"r"}');
+    } finally {
+      await app.close();
+    }
+  });
 });

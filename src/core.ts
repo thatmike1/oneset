@@ -452,7 +452,11 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     return job;
   }
 
-  function viewOf(job: Job, render: (def: AnyAction, outcome: unknown) => unknown): JobView {
+  /** the job as job.get answers it; a promise when the door's renderer returns one */
+  function viewOf(
+    job: Job,
+    render: (def: AnyAction, outcome: unknown) => unknown,
+  ): JobView | Promise<JobView> {
     const view: JobView = {
       id: job.id,
       action: job.def.name,
@@ -460,9 +464,11 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       started: new Date(job.started).toISOString(),
     };
     if (job.finished !== undefined) view.finished = new Date(job.finished).toISOString();
-    if (job.state === "done") view.result = render(job.def, job.value);
     if (job.error) view.error = job.error;
-    return view;
+    if (job.state !== "done") return view;
+    const rendered = render(job.def, job.value);
+    if (!isThenable(rendered)) return { ...view, result: rendered };
+    return Promise.resolve(rendered).then((result) => ({ ...view, result }));
   }
 
   /**
