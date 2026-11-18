@@ -96,8 +96,9 @@ test("the notes example answers over HTTP, MCP, the CLI and the browser client",
     assert.deepEqual(JSON.parse(cliOut.stdout), { id: 3, text: "over the cli" });
 
     // the browser client heard every change, and acts itself
-    for (let i = 0; i < 100 && heard.length < 3; i++) await new Promise((r) => setTimeout(r, 10));
+    for (let i = 0; i < 100 && heard.length < 4; i++) await new Promise((r) => setTimeout(r, 10));
     assert.deepEqual(heard, [
+      { connected: true },
       { action: "note.add", door: "http" },
       { action: "note.add", door: "mcp" },
       { action: "note.add", door: "http" },

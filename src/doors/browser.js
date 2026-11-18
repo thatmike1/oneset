@@ -58,17 +58,19 @@ const listeners = new Set();
 let source = null;
 let opened = false;
 
-function notify(change) {
+function deliver(fn, change) {
   const failed = (err) => console.error("onChange listener failed", err);
-  for (const fn of listeners) {
-    try {
-      // an async listener's rejection is caught too, without waiting for it
-      const out = fn(change);
-      if (out && typeof out.then === "function") Promise.resolve(out).catch(failed);
-    } catch (err) {
-      failed(err);
-    }
+  try {
+    // an async listener's rejection is caught too, without waiting for it
+    const out = fn(change);
+    if (out && typeof out.then === "function") Promise.resolve(out).catch(failed);
+  } catch (err) {
+    failed(err);
   }
+}
+
+function notify(change) {
+  for (const fn of listeners) deliver(fn, change);
 }
 
 function connect() {
@@ -80,20 +82,28 @@ function connect() {
     } catch {}
     notify(change);
   });
-  // a reconnect may have missed changes, so listeners refetch then too
+  // a change between the page's first fetch and the stream going live, or during a drop, is
+  // only caught by refetching, so listeners hear the stream open as well as every change
   source.addEventListener("open", () => {
-    if (opened) notify({ reconnected: true });
+    notify(opened ? { reconnected: true } : { connected: true });
     opened = true;
   });
 }
 
 /**
- * calls `fn` after every change: `{ action, door }` for a run, `{ reconnected: true }` when the
- * stream comes back after a drop. Returns a function that stops listening.
+ * calls `fn` after every change: `{ action, door }` for a run, `{ connected: true }` once the
+ * stream is live (right away for a listener added after that), `{ reconnected: true }` when it
+ * comes back after a drop. A listener that keeps fetched state refetches on each of them.
+ * Returns a function that stops listening.
  */
 export function onChange(fn) {
   listeners.add(fn);
   if (!source) connect();
+  else if (opened) {
+    queueMicrotask(() => {
+      if (listeners.has(fn)) deliver(fn, { connected: true });
+    });
+  }
   return () => {
     listeners.delete(fn);
     if (listeners.size === 0 && source) {

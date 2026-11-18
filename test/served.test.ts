@@ -247,21 +247,30 @@ describe("the browser client", () => {
     });
   });
 
-  test("onChange hears an agent's change, then a reconnect", async () => {
+  test("onChange hears the stream open, an agent's change, then a reconnect", async () => {
     const heard: unknown[] = [];
-    const waitFor = async (n: number) => {
-      for (let i = 0; i < 100 && heard.length < n; i++) await new Promise((r) => setTimeout(r, 10));
+    const waitFor = async (list: unknown[], n: number) => {
+      for (let i = 0; i < 100 && list.length < n; i++) await new Promise((r) => setTimeout(r, 10));
     };
     const stop = client.onChange((change: unknown) => heard.push(change));
     try {
-      await new Promise((r) => setTimeout(r, 100));
+      // the first open is a change too: what happened between the page's fetch and the stream
+      // going live is only caught by refetching once it is live
+      await waitFor(heard, 1);
+      assert.deepEqual(heard, [{ connected: true }]);
       reg.run("note.add", { text: "from an agent" }, undefined, { door: "mcp" });
-      await waitFor(1);
-      assert.deepEqual(heard, [{ action: "note.add", door: "mcp" }]);
+      await waitFor(heard, 2);
+      assert.deepEqual(heard[1], { action: "note.add", door: "mcp" });
+      // a listener added while the stream is already live hears that it is
+      const late: unknown[] = [];
+      const stopLate = client.onChange((change: unknown) => late.push(change));
+      await waitFor(late, 1);
+      assert.deepEqual(late, [{ connected: true }]);
+      stopLate();
       // drop every connection: the client comes back and listeners refetch
       app.server.closeAllConnections();
-      await waitFor(2);
-      assert.deepEqual(heard[1], { reconnected: true });
+      await waitFor(heard, 3);
+      assert.deepEqual(heard[2], { reconnected: true });
     } finally {
       stop();
     }
@@ -289,7 +298,7 @@ describe("the browser client's listeners", () => {
     try {
       await new Promise((r) => setTimeout(r, 100));
       reg.run("note.add", { text: "from an agent" }, undefined, { door: "mcp" });
-      for (let i = 0; i < 100 && heard.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+      for (let i = 0; i < 100 && heard.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
       await new Promise((resolve) => setImmediate(resolve));
       await new Promise((resolve) => setImmediate(resolve));
     } finally {
@@ -299,7 +308,7 @@ describe("the browser client's listeners", () => {
       process.off("unhandledRejection", onUnhandled);
       await app.close();
     }
-    assert.deepEqual(heard, [{ action: "note.add", door: "mcp" }]);
+    assert.deepEqual(heard, [{ connected: true }, { action: "note.add", door: "mcp" }]);
     assert.deepEqual(unhandled, []);
   });
 });
