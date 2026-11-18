@@ -539,3 +539,47 @@ describe("the browser client and a bare change", () => {
     stop();
   });
 });
+
+describe("the browser client with a listener added from a listener", () => {
+  test("gets one ready signal, not one from the broadcast and one of its own", async () => {
+    const { createClient } = await import("../src/doors/browser.js");
+    let source: { fire(type: string): void } | undefined;
+    class FakeSource {
+      private readonly handlers = new Map<string, ((e: { data: string }) => void)[]>();
+      constructor() {
+        source = this;
+      }
+      addEventListener(type: string, fn: (e: { data: string }) => void) {
+        this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+      }
+      fire(type: string) {
+        for (const fn of this.handlers.get(type) ?? []) fn({ data: "" });
+      }
+      close() {}
+    }
+    for (const reconnect of [false, true]) {
+      const client = createClient({ url: "http://127.0.0.1:1", EventSource: FakeSource });
+      const signals: unknown[] = [];
+      const stops: (() => void)[] = [];
+      let armed = !reconnect;
+      // subscribes once, from inside the ready (or back) signal it is handed
+      stops.push(
+        client.onChange((change) => {
+          if (armed && (change.connected || change.reconnected)) {
+            armed = false;
+            stops.push(client.onChange((next) => signals.push(next)));
+          }
+        }),
+      );
+      if (reconnect) {
+        source?.fire("open");
+        source?.fire("error");
+        armed = true;
+      }
+      source?.fire("open");
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.equal(signals.length, 1, `reconnect ${reconnect}: ${JSON.stringify(signals)}`);
+      for (const stop of stops) stop();
+    }
+  });
+});
