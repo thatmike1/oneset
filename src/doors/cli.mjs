@@ -118,8 +118,10 @@ function fieldHelp(entry) {
   for (const [name, p] of Object.entries(props)) {
     const type = p.enum ? p.enum.join("|") : (p.type ?? (p.anyOf ?? []).map((a) => a.type).join("|"));
     const flag = name.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+    // --no-wait is this CLI's own flag, so a field spelled that way is shown in the form it takes
+    const usage = flag === "no-wait" ? `--json '{"${name}":<${type}>}'` : `--${flag} ${type}`;
     lines.push(
-      `  --${flag} ${type}${required.has(name) ? " (required)" : ""}${p.description ? `  ${p.description}` : ""}`,
+      `  ${usage}${required.has(name) ? " (required)" : ""}${p.description ? `  ${p.description}` : ""}`,
     );
   }
   if (Object.keys(props).length === 0) lines.push("  (no fields)");

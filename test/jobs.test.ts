@@ -642,6 +642,10 @@ describe("long actions, after review", () => {
       const echo = await cli(["note.echo", "--text", "--no-wait"]);
       assert.equal(echo.code, 0, echo.stderr);
       assert.equal(echo.stdout, "--no-wait\n");
+      // help shows the form the CLI takes for a field named noWait, not the flag it refuses
+      const help = await cli(["help", "x.slow"]);
+      assert.match(help.stdout, /--json '\{"noWait":<boolean>\}'/);
+      assert.doesNotMatch(help.stdout, /--no-wait boolean/);
       // a field named noWait goes in through --json
       const field = await cli(["x.slow", "--json", '{"noWait":true}']);
       assert.equal(field.code, 0, field.stderr);
