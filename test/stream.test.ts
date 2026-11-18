@@ -248,4 +248,66 @@ describe("the change stream for a signed-in app", () => {
       await app.close();
     }
   });
+
+  test("a hears hook that returns a promise or thenable is silence, and a rejection is logged, not a crash", async () => {
+    const logged: unknown[] = [];
+    const unhandled: unknown[] = [];
+    const onUnhandled = (err: unknown) => unhandled.push(err);
+    process.on("unhandledRejection", onUnhandled);
+    const original = console.error;
+    console.error = (...args: unknown[]) => logged.push(args);
+    const kinds: Record<string, string> = {
+      "Bearer rejects": "rejects",
+      "Bearer thenable": "thenable",
+      "Bearer resolves": "resolves",
+      "Bearer editor": "editor",
+    };
+    const app = await serve(
+      doors(await rowsApp(), {
+        name: "async-hears",
+        caller: (req) => ({ user: kinds[req.headers.authorization ?? ""] ?? "nobody", edits: true }),
+        hears: ((_change: unknown, subscriber: Who) => {
+          if (subscriber.user === "rejects") return Promise.reject(new Error("async hears fixture"));
+          if (subscriber.user === "thenable") {
+            return {
+              // a thenable on purpose: not a Promise, so only a then lookup finds the rejection
+              // biome-ignore lint/suspicious/noThenProperty: the fixture is a hand-made thenable
+              then: (_ok: unknown, fail: (err: Error) => void) => fail(new Error("thenable fixture")),
+            };
+          }
+          if (subscriber.user === "resolves") return Promise.resolve(true);
+          return true;
+        }) as never,
+      }),
+    );
+    try {
+      const open = (as: string) =>
+        openEvents(`${app.url}/api/actions/stream`, { authorization: `Bearer ${as}` });
+      const streams = [
+        await open("rejects"),
+        await open("thenable"),
+        await open("resolves"),
+        await open("editor"),
+      ];
+      const first = await request(app, "row.add", { text: "one" }, "editor");
+      assert.equal(first.status, 200);
+      const got = await Promise.all(streams.map((s) => s.next(300)));
+      assert.deepEqual(
+        got.map((e) => (e ? JSON.parse(e.data) : null)),
+        [null, null, null, { action: "row.add", door: "http" }],
+        "only exactly true lets a change through; a promise of true is still silence",
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const second = await request(app, "row.add", { text: "two" }, "editor");
+      assert.equal(second.status, 200, "the app is still up");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.deepEqual(unhandled, []);
+      assert.equal(logged.length, 4, "each rejection is logged, two per write");
+      for (const s of streams) s.close();
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      console.error = original;
+      await app.close();
+    }
+  });
 });

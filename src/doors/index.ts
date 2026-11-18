@@ -51,7 +51,8 @@ interface BaseOptions<Def, Caller> extends GuardOptions {
    * whether a stream subscriber hears a change at all, for an app whose one stream serves parties
    * that must not learn of each other's changes (tenants). It sees the change, the subscriber's
    * caller and the caller whose run made it. Default: every subscriber, with a bare event for an
-   * action it may not run. A hook that throws counts as false, and is logged
+   * action it may not run. Only exactly `true` lets a change through: a promise is silence, and a
+   * throw or a rejected promise is logged and counts as false
    */
   hears?(change: Change, subscriber: Caller, by: Caller): boolean;
   /** options for the HTTP door: `list`, `describe`, `render`, `draft` */
@@ -228,11 +229,26 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           openStream(registry, req, res, (change, from) => {
             if (opts.hears) {
               // an app with several parties on one stream narrows who hears a change at all
+              // only exactly true lets a change through: a promise, even one of true, is silence,
+              // and its rejection is logged like a throw so it can never take the process down
+              const failed = (err: unknown) =>
+                console.error("oneset: the hears hook failed, so this subscriber hears nothing", err);
               let heard = false;
               try {
-                heard = opts.hears(change, caller, from.caller) === true;
+                const out: unknown = opts.hears(change, caller, from.caller);
+                if (out !== null && (typeof out === "object" || typeof out === "function")) {
+                  const then = (out as { then?: unknown }).then;
+                  if (typeof then === "function") {
+                    try {
+                      then.call(out, undefined, failed);
+                    } catch (err) {
+                      failed(err);
+                    }
+                  }
+                }
+                heard = out === true;
               } catch (err) {
-                console.error("oneset: the hears hook failed, so this subscriber hears nothing", err);
+                failed(err);
               }
               if (!heard) return null;
             }
