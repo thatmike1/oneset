@@ -1,7 +1,7 @@
 // compiled against the packed tarball: every @ts-expect-error below must be an error, and
 // everything else must compile
 import { type ActionDef, ActionError, type ActionsOf, kit } from "oneset";
-import { createClient } from "oneset/client";
+import { type ClientJob, createClient } from "oneset/client";
 import { z } from "zod";
 
 type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
@@ -178,3 +178,9 @@ client.act("note.later", { n: 2 }).then((out) => out.n.toFixed());
 // @ts-expect-error the typed client knows the names
 client.act("note.gone", {});
 client.onChange((change) => (change.action ? change.door.length : change.connected));
+// { wait: false } returns a job only for a long action; an ordinary one answers its own result
+// @ts-expect-error so the type may not promise a job
+const notJob: Promise<ClientJob> = client.act("note.later", { n: 1 }, { wait: false });
+void notJob;
+const either: Promise<ClientJob | { n: number }> = client.act("note.later", { n: 1 }, { wait: false });
+void either;

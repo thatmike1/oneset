@@ -59,7 +59,8 @@ export interface ClientJob {
 export interface Client<A extends AnyActions = AnyActions> {
   /**
    * runs an action and returns its result; a failure throws an ActionError with status and code.
-   * A long action's job is waited for; `{ wait: false }` returns the job instead
+   * A long action's job is waited for; `{ wait: false }` returns the job instead (an ordinary
+   * action still answers its result, so that call's type is either)
    */
   act<N extends keyof A & string>(
     name: N,
@@ -70,7 +71,7 @@ export interface Client<A extends AnyActions = AnyActions> {
     name: N,
     input: A[N]["input"],
     options: { wait: false },
-  ): Promise<ClientJob>;
+  ): Promise<ClientJob | A[N]["output"]>;
   /** reads a long action's job, waiting up to `wait` seconds (default 30) for it to finish */
   act(name: "job.get", input: { id: string; wait?: number }): Promise<ClientJob>;
   /** the actions this page may run, with their input schemas */
