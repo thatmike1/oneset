@@ -125,3 +125,16 @@ test("the README carries the example whole, since the package does not ship it",
     "README's example differs from examples/notes/server.mjs",
   );
 });
+
+test("the README's browser client paragraph names every signal a listener gets", () => {
+  const readme = readFileSync(join(root, "README.md"), "utf8");
+  const paragraph = readme.split("\n").find((line) => line.startsWith("- `oneset/client`")) ?? "";
+  for (const signal of [
+    "{ action, door }",
+    "{ changed: true }",
+    "{ connected: true }",
+    "{ reconnected: true }",
+  ]) {
+    assert.ok(paragraph.includes(signal), `missing ${signal}`);
+  }
+});
