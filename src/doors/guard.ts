@@ -56,7 +56,11 @@ export function createGuard(options: GuardOptions = {}): Guard {
     let originHost: string | null = null;
     try {
       const url = new URL(o);
-      if (url.protocol === "http:" || url.protocol === "https:") originHost = url.host;
+      const web = url.protocol === "http:" || url.protocol === "https:";
+      // only a serialized origin, scheme, host and an optional port, as a browser sends it: a URL
+      // with credentials, a path, a query or a non-canonical host is not one, though its host may match
+      const defaultPort = url.protocol === "http:" ? "80" : "443";
+      if (web && (o === url.origin || o === `${url.origin}:${defaultPort}`)) originHost = url.host;
     } catch {}
     // URL drops a default port, so compare against the bare name for :80 and :443 too
     if (originHost && (hostAllowed(originHost, port) || extraHosts.has(originHost))) return;

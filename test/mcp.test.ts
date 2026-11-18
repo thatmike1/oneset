@@ -638,10 +638,11 @@ describe("raw malformed requests", () => {
   });
 
   test("the guard still applies in front of it, answering in MCP's error shape", async () => {
-    for (const headers of [{ origin: "https://evil.example" }, { host: "evil.example" }] as Record<
-      string,
-      string
-    >[]) {
+    for (const headers of [
+      { origin: "https://evil.example" },
+      { host: "evil.example" },
+      { origin: `http://evil@localhost:${app.port}` },
+    ] as Record<string, string>[]) {
       const res = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }), headers);
       assert.equal(res.status, 403);
       assert.equal(res.json().error.code, -32000);

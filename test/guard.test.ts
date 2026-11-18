@@ -86,6 +86,33 @@ for (const setup of setups) {
       }
     });
 
+    // only a serialized origin passes: scheme, host and port, nothing else. The host alone of
+    // a URL with credentials or a path is a loopback name, which used to be enough
+    test("an Origin that is a URL but not an origin is refused", async () => {
+      const port = app.port;
+      for (const origin of [
+        `http://evil@localhost:${port}`,
+        `http://user:pw@localhost:${port}`,
+        `http://localhost:${port}/not-an-origin`,
+        `http://localhost:${port}/`,
+        `http://localhost:${port}?x`,
+        `http://localhost:${port}#x`,
+        `http://localhost:${port}\\x`,
+        `http://localhost:${port}:`,
+        `http://loc%61lhost:${port}`,
+        `http://[0:0:0:0:0:0:0:1]:${port}`,
+        `ftp://localhost:${port}`,
+      ]) {
+        const write = await post({ origin });
+        assert.equal(write.status, 403, origin);
+        assert.equal(write.json().error.code, "foreign_origin");
+      }
+      for (const origin of [`HTTP://LOCALHOST:${port}`, `http://127.0.0.1:${port}`, `http://[::1]:${port}`]) {
+        const res = await raw(app.port, { path: "/api/actions", headers: { origin } });
+        assert.equal(res.status, 200, origin);
+      }
+    });
+
     test("a body that is not JSON is refused", async () => {
       for (const type of [
         "text/plain",
@@ -149,6 +176,20 @@ describe("hosts and origins options", () => {
       headers: { host: "notes.example.com", origin: "https://notes.example.com" },
     });
     assert.equal(res.status, 200);
+    for (const origin of ["https://notes.example.com:443", "http://notes.example.com"]) {
+      const same = await raw(app.port, {
+        path: "/api/actions",
+        headers: { host: "notes.example.com", origin },
+      });
+      assert.equal(same.status, 200, origin);
+    }
+    for (const origin of ["https://mike@notes.example.com", "https://notes.example.com/app"]) {
+      const odd = await raw(app.port, {
+        path: "/api/actions",
+        headers: { host: "notes.example.com", origin },
+      });
+      assert.equal(odd.status, 403, origin);
+    }
     const local = await raw(app.port, { path: "/api/actions" });
     assert.equal(local.status, 200, "loopback still passes");
     const other = await raw(app.port, { path: "/api/actions", headers: { host: "other.example.com" } });
