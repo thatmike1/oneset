@@ -381,7 +381,8 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     const out = hooks.around
       ? hooks.around(def, data, caller, (i, ctx) => def.run(i, ctx), runInfo)
       : def.run(data, caller);
-    if (!def.mutates || runInfo.nested || listeners.size === 0) return out;
+    // the listeners are looked at when the run finishes, not now: a page may subscribe meanwhile
+    if (!def.mutates || runInfo.nested) return out;
     const change: Change = { action: def.name, door: runInfo.door };
     if (runInfo.job !== undefined) change.job = runInfo.job;
     if (isThenable(out)) {

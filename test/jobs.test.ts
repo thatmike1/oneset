@@ -478,3 +478,53 @@ describe("a long action through the mounted doors", () => {
     assert.match(res.text, /## Long actions\n\n.*job_get/);
   });
 });
+
+describe("long actions, after review", () => {
+  test("a page that subscribes after a job started still hears it finish", async () => {
+    const gates = new Map([["late", gate()]]);
+    const reg = createRegistry(looksApp({ gates }).actions);
+    const app = await serve(doors(reg, { name: "late" }));
+    try {
+      // no listener exists when the job starts
+      const res = await raw(app.port, {
+        method: "POST",
+        path: "/api/actions/look.roll",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ for: "late" }),
+      });
+      const { id } = res.json().job as JobView;
+      const events = await openEvents(`${app.url}/api/actions/stream`);
+      try {
+        await sleep(50);
+        gates.get("late")?.open();
+        const event = await events.next(2000);
+        assert.equal(event?.event, "change");
+        assert.equal(JSON.parse(event?.data ?? "{}").job, id);
+      } finally {
+        events.close();
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
+  test("an inline async run announces its change to a listener added while it ran", async () => {
+    let release = () => {};
+    const reg = createRegistry([
+      defineAction({
+        name: "x.add",
+        area: "x",
+        summary: "add",
+        mutates: true,
+        input: z.object({}),
+        run: () => new Promise<number>((resolve) => (release = () => resolve(1))),
+      }),
+    ]);
+    const out = reg.run("x.add", {}, undefined) as Promise<number>;
+    const heard: unknown[] = [];
+    reg.onChange((change) => heard.push(change));
+    release();
+    await out;
+    assert.deepEqual(heard, [{ action: "x.add", door: "direct" }]);
+  });
+});
