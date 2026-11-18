@@ -583,3 +583,35 @@ describe("the browser client with a listener added from a listener", () => {
     }
   });
 });
+
+describe("the browser client with a listener removed from a listener", () => {
+  test("a listener stopped during a broadcast does not get that change", async () => {
+    const { createClient } = await import("../src/doors/browser.js");
+    let source: { fire(type: string, data?: string): void } | undefined;
+    class FakeSource {
+      private readonly handlers = new Map<string, ((e: { data: string }) => void)[]>();
+      constructor() {
+        source = this;
+      }
+      addEventListener(type: string, fn: (e: { data: string }) => void) {
+        this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+      }
+      fire(type: string, data = "") {
+        for (const fn of this.handlers.get(type) ?? []) fn({ data });
+      }
+      close() {}
+    }
+    const client = createClient({ url: "http://127.0.0.1:1", EventSource: FakeSource });
+    const stopped: unknown[] = [];
+    let stopNext = () => {};
+    const stopFirst = client.onChange((change) => {
+      if (change.action) stopNext();
+    });
+    stopNext = client.onChange((change) => stopped.push(change));
+    const change = JSON.stringify({ action: "row.add", door: "http" });
+    source?.fire("change", change);
+    source?.fire("change", change);
+    assert.deepEqual(stopped, []);
+    stopFirst();
+  });
+});

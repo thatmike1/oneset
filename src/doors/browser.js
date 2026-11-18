@@ -103,7 +103,10 @@ export function createClient(options = {}) {
 
   function notify(change) {
     // a snapshot: a listener added while this goes out gets its own ready signal, not this one too
-    for (const fn of [...listeners]) deliver(fn, change);
+    for (const fn of [...listeners]) {
+      // one that stopped listening while this went out does not get it
+      if (listeners.has(fn)) deliver(fn, change);
+    }
   }
 
   function connect() {
