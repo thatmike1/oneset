@@ -114,6 +114,7 @@ export function doors<R extends Registry<any, any, any, any, any>>(
     "/setup": { kind: "setup", methods: ["GET"] },
   };
 
+  /** an action name from the path, still percent-encoded; decoded behind the guard */
   function route(
     path: string,
     method: string,
@@ -127,14 +128,27 @@ export function doors<R extends Registry<any, any, any, any, any>>(
       return {
         kind: "run",
         methods: path === "/api/actions/stream" ? ["GET", "POST"] : ["POST"],
-        action: decodeURIComponent(run[1] ?? ""),
+        action: run[1] ?? "",
       };
     return null;
   }
 
+  function decodeAction(encoded: string): string {
+    try {
+      return decodeURIComponent(encoded);
+    } catch {
+      throw new ActionError(400, "bad_path", "the action name in the path is not valid percent-encoding");
+    }
+  }
+
   return async function handle(req, res) {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    let path = url.pathname;
+    let path: string;
+    try {
+      path = new URL(req.url ?? "/", "http://localhost").pathname;
+    } catch {
+      // a request target no URL parses (`//`, `//[`) is none of the kit's paths
+      return false;
+    }
     if (base) {
       if (path !== base && !path.startsWith(`${base}/`)) return false;
       path = path.slice(base.length) || "/";
@@ -160,9 +174,10 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           break;
         }
         case "run": {
+          const name = decodeAction(r.action ?? "");
           const input = await guard.readJson(req);
           const caller = await resolve(req, "http");
-          const result = await http.run(r.action ?? "", input, caller);
+          const result = await http.run(name, input, caller);
           sendJson(res, 200, { result });
           break;
         }

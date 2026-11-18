@@ -1,5 +1,6 @@
 // the HTTP door: the catalog and runs in the one wire format, errors rendered by status and code
 import assert from "node:assert/strict";
+import { type ChildProcess, spawn } from "node:child_process";
 import { after, before, describe, test } from "node:test";
 import { z } from "zod";
 import { doors } from "../src/doors/index.ts";
@@ -265,5 +266,63 @@ describe("base", () => {
   test("a base must start with a slash and not end with one", () => {
     assert.throws(() => doors(notesRegistry(), { name: "notes", base: "kit" }), /base/);
     assert.throws(() => doors(notesRegistry(), { name: "notes", base: "/kit/" }), /base/);
+  });
+});
+
+describe("malformed paths", () => {
+  // the server runs in a child process, the way the example mounts the doors, so a crash shows
+  // up as a dead process instead of taking the test runner down with it
+  const SERVER = `
+    import { createServer } from "node:http";
+    import { doors } from ${JSON.stringify(new URL("../src/doors/index.ts", import.meta.url).href)};
+    import { notesRegistry } from ${JSON.stringify(new URL("./fixtures/notes.ts", import.meta.url).href)};
+    const handle = doors(notesRegistry(), { name: "notes" });
+    const server = createServer(async (req, res) => {
+      if (await handle(req, res)) return;
+      res.writeHead(404).end("app");
+    });
+    server.listen(0, "127.0.0.1", () => console.log(server.address().port));
+  `;
+  let child: ChildProcess;
+  let port = 0;
+  let exited: number | null = null;
+  before(async () => {
+    child = spawn(process.execPath, ["--input-type=module", "--no-warnings", "-e", SERVER], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.on("exit", (code) => {
+      exited = code ?? -1;
+    });
+    port = await new Promise<number>((resolve, reject) => {
+      child.stdout?.once("data", (d: Buffer) => resolve(Number(String(d).trim())));
+      child.once("exit", () => reject(new Error("the server did not start")));
+    });
+  });
+  after(() => {
+    child.kill();
+  });
+
+  test("a bad percent-encoding in an action name is a 400 and the server stays up", async () => {
+    for (const path of ["/api/actions/%", "/api/actions/%E0%A4%A", "/api/actions/note%2"]) {
+      const res = await raw(port, { path, ...json({}) });
+      assert.equal(res.status, 400, path);
+      assert.equal(res.json().error.code, "bad_path");
+    }
+    assert.equal(exited, null, "the server is still running");
+    assert.equal((await raw(port, { path: "/api/actions" })).status, 200);
+  });
+
+  test("the guard still answers first for a foreign Host", async () => {
+    const res = await raw(port, { path: "/api/actions/%", ...json({}), headers: { host: "evil.example" } });
+    assert.equal(res.status, 403);
+  });
+
+  test("a request target URL cannot parse falls through to the app", async () => {
+    for (const path of ["//", "//[", "//a:b@"]) {
+      const res = await raw(port, { path });
+      assert.equal(res.status, 404, path);
+      assert.equal(res.text, "app");
+    }
+    assert.equal(exited, null, "the server is still running");
   });
 });

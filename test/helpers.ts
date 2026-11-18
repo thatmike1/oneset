@@ -56,9 +56,12 @@ export function raw(
     const headers: Record<string, string> = { host: `127.0.0.1:${port}`, ...opts.headers };
     if (opts.body !== undefined && !opts.chunked)
       headers["content-length"] = String(Buffer.byteLength(opts.body));
+    let responded = false;
+    let dropped: Error | null = null;
     const req = request(
       { host: "127.0.0.1", port, method: opts.method ?? "GET", path: opts.path, headers, setHost: false },
       (res) => {
+        responded = true;
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
         res.on("end", () => {
@@ -69,14 +72,17 @@ export function raw(
       },
     );
     req.on("error", (err) => {
-      // the server may close the socket after refusing an oversized body
-      if (
-        (err as NodeJS.ErrnoException).code === "ECONNRESET" ||
-        (err as NodeJS.ErrnoException).code === "EPIPE"
-      ) {
+      // the server may close the socket after refusing an oversized body, while the answer it
+      // sent first is still on its way; a drop with no answer at all fails on close below
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ECONNRESET" || code === "EPIPE") {
+        dropped = err;
         return;
       }
       reject(err);
+    });
+    req.on("close", () => {
+      if (!responded) reject(dropped ?? new Error(`the server closed ${opts.path} with no answer`));
     });
     if (opts.body !== undefined) {
       if (opts.chunked) {
