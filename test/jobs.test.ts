@@ -794,4 +794,33 @@ describe("long actions, after review", () => {
     assert.deepEqual(rows, ["b"]);
     assert.deepEqual(heard, [{ action: "row.add", door: "direct" }]);
   });
+
+  test("an app's own job.get with no long action gets no long-action guidance over MCP", async () => {
+    const reg = createRegistry([
+      defineAction({
+        name: "job.get",
+        area: "jobs",
+        summary: "The app's own print job",
+        mutates: false,
+        input: z.object({}),
+        run: () => "printing",
+      }),
+    ]);
+    const app = await serve(doors(reg, { name: "printer", instructions: "Prints." }));
+    const client = new Client({ name: "test", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${app.url}/mcp`)));
+    try {
+      assert.equal(client.getInstructions(), "Prints.");
+      const { tools } = await client.listTools();
+      assert.deepEqual(
+        tools.map((t) => [t.name, t.description]),
+        [["job_get", "The app's own print job"]],
+      );
+      const out = await client.callTool({ name: "job_get", arguments: {} });
+      assert.equal((out.content as { text: string }[])[0]?.text, "printing");
+    } finally {
+      await client.close();
+      await app.close();
+    }
+  });
 });

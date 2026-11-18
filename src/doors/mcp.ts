@@ -300,7 +300,9 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
   // the same guard doors() puts in front of every path, so a standalone mount keeps it
   const guard = createGuard({ ...(hosts ? { hosts } : {}), ...(origins ? { origins } : {}) });
   const tools = (reg as Registry).door({ ...door, draft, name: "mcp" });
-  const jobDef = (reg as Registry).get(JOB_ACTION);
+  // the kit's job reader exists only when an action is long; an app's own job.get is in actions
+  const hasLong = (reg as Registry).actions.some((def) => def.long);
+  const jobDef = hasLong ? (reg as Registry).get(JOB_ACTION) : undefined;
   const byTool = new Map(
     [...(reg as Registry).actions, ...(jobDef ? [jobDef] : [])].map((def) => [
       def.name.replaceAll(".", "_"),
@@ -308,7 +310,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     ]),
   );
   // the kit's guidance for long actions goes after the app's own
-  const guide = jobDef ? [instructions, LONG_GUIDE].filter(Boolean).join("\n\n") : instructions;
+  const guide = hasLong ? [instructions, LONG_GUIDE].filter(Boolean).join("\n\n") : instructions;
 
   async function callTool(
     params: Record<string, unknown>,
