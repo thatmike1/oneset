@@ -479,3 +479,37 @@ describe("a null error body", () => {
     }
   });
 });
+
+describe("the browser client during a drop", () => {
+  test("a listener added while the stream is down hears it come back, not that it is live", async () => {
+    const { createClient } = await import("../src/doors/browser.js");
+    let source: { fire(type: string): void } | undefined;
+    class FakeSource {
+      private readonly handlers = new Map<string, ((e: { data: string }) => void)[]>();
+      constructor() {
+        source = this;
+      }
+      addEventListener(type: string, fn: (e: { data: string }) => void) {
+        this.handlers.set(type, [...(this.handlers.get(type) ?? []), fn]);
+      }
+      fire(type: string) {
+        for (const fn of this.handlers.get(type) ?? []) fn({ data: "" });
+      }
+      close() {}
+    }
+    const client = createClient({ url: "http://127.0.0.1:1", EventSource: FakeSource });
+    const first: unknown[] = [];
+    const second: unknown[] = [];
+    const stopFirst = client.onChange((change) => first.push(change));
+    source?.fire("open");
+    source?.fire("error");
+    const stopSecond = client.onChange((change) => second.push(change));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(second, [], "the stream is down, so nothing says it is live");
+    source?.fire("open");
+    assert.deepEqual(first, [{ connected: true }, { reconnected: true }]);
+    assert.deepEqual(second, [{ reconnected: true }]);
+    stopFirst();
+    stopSecond();
+  });
+});

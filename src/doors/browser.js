@@ -86,7 +86,9 @@ export function createClient(options = {}) {
 
   const listeners = new Set();
   let source = null;
+  // opened: the stream has been live at least once; live: it is live right now
   let opened = false;
+  let live = false;
 
   function deliver(fn, change) {
     const failed = (err) => console.error("onChange listener failed", err);
@@ -116,8 +118,13 @@ export function createClient(options = {}) {
     // a change between the page's first fetch and the stream going live, or during a drop, is
     // only caught by refetching, so listeners hear the stream open as well as every change
     source.addEventListener("open", () => {
+      live = true;
       notify(opened ? { reconnected: true } : { connected: true });
       opened = true;
+    });
+    // EventSource retries by itself; the next open tells every listener it is back
+    source.addEventListener("error", () => {
+      live = false;
     });
   }
 
@@ -130,7 +137,7 @@ export function createClient(options = {}) {
   function onChange(fn) {
     listeners.add(fn);
     if (!source) connect();
-    else if (opened) {
+    else if (live) {
       queueMicrotask(() => {
         if (listeners.has(fn)) deliver(fn, { connected: true });
       });
@@ -141,6 +148,7 @@ export function createClient(options = {}) {
         source.close();
         source = null;
         opened = false;
+        live = false;
       }
     };
   }
