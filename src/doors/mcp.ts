@@ -5,7 +5,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AnyAction, Door, DoorOptions, Registry } from "../core.ts";
 import { errorShape } from "../errors.ts";
-import { createGuard, type GuardOptions } from "./guard.ts";
+import { createGuard, type GuardOptions, maxBodyOf } from "./guard.ts";
 
 /**
  * the protocol versions this door speaks, newest first. Only versions whose published contract
@@ -262,12 +262,13 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     name,
     version = "1.0.0",
     instructions,
-    maxBody = 1024 * 1024,
+    maxBody: askedMaxBody,
     draft = "draft-7",
     hosts,
     origins,
     ...door
   } = options as McpOptions;
+  const maxBody = maxBodyOf({ maxBody: askedMaxBody });
   // the same guard doors() puts in front of every path, so a standalone mount keeps it
   const guard = createGuard({ ...(hosts ? { hosts } : {}), ...(origins ? { origins } : {}) });
   const tools = (reg as Registry).door({ ...door, draft, name: "mcp" });

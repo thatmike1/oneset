@@ -90,7 +90,8 @@ export function doors<R extends Registry<any, any, any, any, any>>(
     ...(opts.mcp as DoorSettings),
     name: opts.name,
     ...(opts.instructions ? { instructions: opts.instructions } : {}),
-    ...(opts.maxBody ? { maxBody: opts.maxBody } : {}),
+    // 0 is a cap too, so only a missing one falls back to the default
+    ...(opts.maxBody !== undefined ? { maxBody: opts.maxBody } : {}),
     ...(opts.hosts ? { hosts: opts.hosts } : {}),
     ...(opts.origins ? { origins: opts.origins } : {}),
   });

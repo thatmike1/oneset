@@ -647,6 +647,31 @@ describe("raw malformed requests", () => {
     }
   });
 
+  test("maxBody: 0 caps MCP the same as HTTP, and a cap that is not a size refuses to start", async () => {
+    const none = await serve(doors(notesRegistry(), { name: "notes", maxBody: 0 }));
+    try {
+      const viaMcp = await raw(none.port, {
+        method: "POST",
+        path: "/mcp",
+        headers: { "content-type": "application/json", accept: ACCEPT },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      });
+      const viaHttp = await raw(none.port, {
+        method: "POST",
+        path: "/api/actions/note.count",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      assert.deepEqual([viaMcp.status, viaHttp.status], [413, 413]);
+    } finally {
+      await none.close();
+    }
+    for (const maxBody of [-1, Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
+      assert.throws(() => doors(notesRegistry(), { name: "notes", maxBody }), /maxBody/, String(maxBody));
+      assert.throws(() => mcp(notesRegistry(), { name: "notes", maxBody }), /maxBody/, String(maxBody));
+    }
+  });
+
   test("the guard still applies in front of it, answering in MCP's error shape", async () => {
     for (const headers of [
       { origin: "https://evil.example" },

@@ -28,8 +28,17 @@ export interface Guard {
   readJson(req: IncomingMessage): Promise<unknown>;
 }
 
-export function createGuard(options: GuardOptions = {}): Guard {
+/** the body cap, checked once so every door reads the same number: a whole number of bytes, 0 or more */
+export function maxBodyOf(options: { maxBody?: number | undefined }): number {
   const maxBody = options.maxBody ?? 1024 * 1024;
+  if (!Number.isSafeInteger(maxBody) || maxBody < 0) {
+    throw new Error(`oneset: maxBody must be a whole number of bytes, 0 or more (got ${maxBody})`);
+  }
+  return maxBody;
+}
+
+export function createGuard(options: GuardOptions = {}): Guard {
+  const maxBody = maxBodyOf(options);
   const extraHosts = new Set((options.hosts ?? []).map((h) => h.toLowerCase()));
   const extraOrigins = new Set((options.origins ?? []).map((o) => o.toLowerCase().replace(/\/$/, "")));
 
