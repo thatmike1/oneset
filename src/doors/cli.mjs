@@ -53,13 +53,28 @@ async function call(cfg, method, path, body) {
   return data;
 }
 
-/** turns --field value pairs into input, coercing by the field's JSON schema type */
+/**
+ * turns --field value pairs into input, coercing by the field's JSON schema type. `--no-wait`
+ * where a flag goes is this CLI's own flag, never a field; a value after a field is always that
+ * field's, whatever it looks like. A field named noWait goes in through --json
+ */
 function parseFlags(args, schema) {
   const props = schema.properties ?? {};
   const input = {};
+  let noWait = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (!arg.startsWith("--")) die(`unexpected argument ${arg}; fields are passed as --name value`);
+    if (arg === "--no-wait") {
+      noWait = true;
+      continue;
+    }
+    if (!arg.startsWith("--")) {
+      const hint =
+        args[i - 1] === "--no-wait"
+          ? "; --no-wait is this CLI's own flag and takes no value, so pass a field named noWait with --json"
+          : "; fields are passed as --name value";
+      die(`unexpected argument ${arg}${hint}`);
+    }
     const [rawName, inline] = arg.slice(2).split(/=(.*)/s);
     const value = inline ?? args[++i];
     if (value === undefined) die(`--${rawName} needs a value`);
@@ -70,7 +85,7 @@ function parseFlags(args, schema) {
     const name = rawName.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
     input[name] = coerce(value, props[name]);
   }
-  return input;
+  return { input, noWait };
 }
 
 function coerce(value, prop = {}) {
@@ -150,16 +165,8 @@ if (!cmd || cmd === "--help" || cmd === "-h") {
   const { actions } = await call(cfg, "GET", "/api/actions");
   const entry = find(actions, cmd);
   if (!entry) die(`no action ${cmd}; run ${APP.slug} actions`);
-  const noWait = rest.includes("--no-wait");
-  const out = await call(
-    cfg,
-    "POST",
-    `/api/actions/${encodeURIComponent(entry.name)}`,
-    parseFlags(
-      rest.filter((a) => a !== "--no-wait"),
-      entry.inputSchema,
-    ),
-  );
+  const { input, noWait } = parseFlags(rest, entry.inputSchema);
+  const out = await call(cfg, "POST", `/api/actions/${encodeURIComponent(entry.name)}`, input);
   if (!out.job) print(out.result);
   else if (noWait) print(out.job);
   else {

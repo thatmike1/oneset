@@ -605,4 +605,56 @@ describe("long actions, after review", () => {
     assert.throws(() => read(ids[0] as string), /no job/);
     assert.equal(read(ids[1] as string).result, 1);
   });
+
+  test("the CLI reads --no-wait as its own flag only where a flag goes", async () => {
+    const reg = createRegistry([
+      defineAction({
+        name: "note.echo",
+        area: "notes",
+        summary: "echo",
+        mutates: false,
+        input: z.object({ text: z.string() }),
+        run: (input) => input.text,
+      }),
+      defineAction({
+        name: "x.slow",
+        area: "x",
+        summary: "slow",
+        mutates: false,
+        long: true,
+        input: z.object({ noWait: z.boolean().optional() }),
+        run: async (input) => ({ noWait: input.noWait ?? null }),
+      }),
+    ]);
+    const app = await serve(doors(reg, { name: "flags" }));
+    const dir = mkdtempSync(join(tmpdir(), "oneset-flags-"));
+    try {
+      const file = join(dir, "flags.mjs");
+      writeFileSync(file, (await raw(app.port, { path: "/cli/flags.mjs" })).text);
+      const cli = (args: string[]) =>
+        promisify(execFile)(process.execPath, [file, ...args], {
+          env: { PATH: process.env.PATH ?? "", XDG_CONFIG_HOME: join(dir, "config") },
+        }).then(
+          (out) => ({ code: 0, stdout: out.stdout, stderr: out.stderr }),
+          (err: { code: number; stdout: string; stderr: string }) => err,
+        );
+      // a value that happens to be spelled like the flag is still the value
+      const echo = await cli(["note.echo", "--text", "--no-wait"]);
+      assert.equal(echo.code, 0, echo.stderr);
+      assert.equal(echo.stdout, "--no-wait\n");
+      // a field named noWait goes in through --json
+      const field = await cli(["x.slow", "--json", '{"noWait":true}']);
+      assert.equal(field.code, 0, field.stderr);
+      assert.deepEqual(JSON.parse(field.stdout), { noWait: true });
+      const detached = await cli(["x.slow", "--no-wait"]);
+      assert.equal(detached.code, 0, detached.stderr);
+      assert.equal(JSON.parse(detached.stdout).action, "x.slow");
+      const ambiguous = await cli(["x.slow", "--no-wait", "true"]);
+      assert.equal(ambiguous.code, 1);
+      assert.match(ambiguous.stderr, /--no-wait is this CLI's own flag.*--json/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      await app.close();
+    }
+  });
 });
