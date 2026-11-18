@@ -77,7 +77,7 @@ export function setupLines(app: AppInfo) {
   const auth = key ? ' -H "Authorization: Bearer <agent key>"' : "";
   const cli =
     `mkdir -p ~/.local/bin && curl -fsSL ${app.url}/cli/${app.slug}.mjs -o ~/.local/bin/${app.slug} ` +
-    `&& chmod +x ~/.local/bin/${app.slug}${key ? ` && ${app.slug} login ${app.url} <agent key>` : ""}`;
+    `&& chmod +x ~/.local/bin/${app.slug}${key ? ` && ${app.slug} login ${app.url} "<agent key>"` : ""}`;
   const skill =
     `mkdir -p ~/.claude/skills/${app.slug} && curl -fsSL${auth} ${app.url}/skill/SKILL.md ` +
     `-o ~/.claude/skills/${app.slug}/SKILL.md`;

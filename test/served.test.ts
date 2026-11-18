@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { setupLines } from "../src/doors/files.ts";
 import { doors } from "../src/doors/index.ts";
 import { ActionError, createRegistry, defineAction } from "../src/index.ts";
 import { notesRegistry } from "./fixtures/notes.ts";
@@ -149,9 +150,24 @@ describe("the CLI with an agent key", () => {
   test("the setup page and the skill line ask for a key", async () => {
     const page = await raw(app.port, { path: "/setup", headers: { authorization: "Bearer sekret" } });
     assert.match(page.text, /--header &quot;Authorization: Bearer &lt;agent key&gt;&quot;/);
-    assert.match(page.text, /keyed login http:\/\/127\.0\.0\.1:\d+ &lt;agent key&gt;/);
+    assert.match(page.text, /keyed login http:\/\/127\.0\.0\.1:\d+ &quot;&lt;agent key&gt;&quot;/);
     const skill = await raw(app.port, { path: "/skill/SKILL.md" });
     assert.equal(skill.status, 401, "the skill is resolved for a caller like the API");
+  });
+});
+
+describe("the setup lines", () => {
+  test("every shell line parses, with and without a key", async () => {
+    for (const signIn of [false, true]) {
+      const lines = setupLines({ name: "Keyed", slug: "keyed", url: "http://127.0.0.1:9/kit", signIn });
+      for (const [kind, line] of Object.entries({ mcp: lines.mcp, cli: lines.cli, skill: lines.skill })) {
+        const parsed = await run("bash", ["-n", "-c", line]).then(
+          () => "ok",
+          (err: { stderr: string }) => err.stderr,
+        );
+        assert.equal(parsed, "ok", `${kind} line, signIn ${signIn}: ${line}`);
+      }
+    }
   });
 });
 
