@@ -76,14 +76,26 @@ export function doors<R extends Registry<any, any, any, any, any>>(
   if (base !== "" && !/^(\/[^/]+)+$/.test(base)) {
     throw new Error(`oneset: base must start with a slash and not end with one, like "/kit" (got "${base}")`);
   }
-  const foreign = (opts.hosts ?? []).filter((h) => !isLoopback(h));
+  // the public address is a host the app answers on, so the guard and the no-sign-in check count it
+  let urlHost: string | undefined;
+  if (opts.url !== undefined) {
+    try {
+      urlHost = new URL(opts.url).host.toLowerCase();
+    } catch {
+      throw new Error(
+        `oneset: url must be an absolute address like https://notes.example.com (got "${opts.url}")`,
+      );
+    }
+  }
+  const hosts = [...(opts.hosts ?? []), ...(urlHost && !isLoopback(urlHost) ? [urlHost] : [])];
+  const foreign = hosts.filter((h) => !isLoopback(h));
   if (foreign.length > 0 && !opts.caller && !opts.openWithoutSignIn) {
     throw new Error(
       `oneset: ${foreign.join(", ")} is not a loopback host and there is no \`caller\`, so anyone could ` +
         "run every action. Pass a `caller` that signs requests in, or `openWithoutSignIn: true` if that is intended.",
     );
   }
-  const guard = createGuard(opts);
+  const guard = createGuard({ ...opts, hosts });
   const registry = reg as Registry;
   const http = registry.door({ ...(opts.http as DoorSettings), name: "http" });
   const mcpHandle = mcp(registry, {
@@ -92,7 +104,7 @@ export function doors<R extends Registry<any, any, any, any, any>>(
     ...(opts.instructions ? { instructions: opts.instructions } : {}),
     // 0 is a cap too, so only a missing one falls back to the default
     ...(opts.maxBody !== undefined ? { maxBody: opts.maxBody } : {}),
-    ...(opts.hosts ? { hosts: opts.hosts } : {}),
+    hosts,
     ...(opts.origins ? { origins: opts.origins } : {}),
   });
   const resolve = async (req: IncomingMessage, door: DoorKind) =>

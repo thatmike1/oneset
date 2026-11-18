@@ -221,3 +221,44 @@ describe("a deployed app with no sign-in", () => {
     );
   });
 });
+
+describe("a public url", () => {
+  test("counts as a deployed host: no caller means no start", () => {
+    assert.throws(
+      () => doors(notesRegistry(), { name: "notes", url: "https://notes.example.com" }),
+      /caller/,
+    );
+    assert.doesNotThrow(() => doors(notesRegistry(), { name: "notes", url: "http://127.0.0.1:1355" }));
+    assert.throws(() => doors(notesRegistry(), { name: "notes", url: "not a url" }), /url/);
+  });
+
+  test("widens the accepted hosts and origins to its own, with no hosts option", async () => {
+    const app = await serve(
+      doors(notesRegistry(), { name: "notes", url: "https://notes.example.com/", caller: () => ({}) }),
+    );
+    try {
+      const host = await raw(app.port, { path: "/api/actions", headers: { host: "notes.example.com" } });
+      assert.equal(host.status, 200);
+      const origin = await raw(app.port, {
+        path: "/api/actions",
+        headers: { origin: "https://notes.example.com" },
+      });
+      assert.equal(origin.status, 200);
+      const mcp = await raw(app.port, {
+        method: "POST",
+        path: "/mcp",
+        headers: {
+          host: "notes.example.com",
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }),
+      });
+      assert.equal(mcp.status, 200);
+      const other = await raw(app.port, { path: "/api/actions", headers: { host: "other.example.com" } });
+      assert.equal(other.status, 403);
+    } finally {
+      await app.close();
+    }
+  });
+});
