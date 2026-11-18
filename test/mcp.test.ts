@@ -45,7 +45,8 @@ describe("the MCP door through the official SDK client", () => {
   test("initialize negotiates the latest version and sends instructions", () => {
     assert.deepEqual(client.getServerVersion(), { name: "notes", version: "1.0.0" });
     assert.equal(client.getInstructions(), INSTRUCTIONS);
-    assert.deepEqual(client.getServerCapabilities(), { tools: { listChanged: true } });
+    // no listChanged: this stateless door never sends a list-changed notification
+    assert.deepEqual(client.getServerCapabilities(), { tools: {} });
   });
 
   test("lists the tools it lists, with draft-7 schemas and annotations", async () => {
@@ -218,6 +219,10 @@ describe("the same answers as the SDK's own server", () => {
         method: "initialize",
         params: { protocolVersion, capabilities: {}, clientInfo: { name: "t", version: "1" } },
       });
+      // the one deliberate difference: the SDK advertises listChanged, which this door never sends
+      assert.deepEqual(a.result.capabilities, { tools: {} });
+      assert.deepEqual(b.result.capabilities, { tools: { listChanged: true } });
+      a.result.capabilities = b.result.capabilities;
       assert.deepEqual(a, b, protocolVersion);
     }
   });

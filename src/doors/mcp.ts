@@ -222,7 +222,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
             : LATEST_PROTOCOL_VERSION;
         const result: Record<string, unknown> = {
           protocolVersion,
-          capabilities: { tools: { listChanged: true } },
+          capabilities: { tools: {} },
           serverInfo: { name, version },
         };
         if (instructions) result.instructions = instructions;
