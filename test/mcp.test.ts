@@ -426,6 +426,40 @@ describe("raw malformed requests", () => {
     }
   });
 
+  test("only advertised tool names run: an action's dotted name is an unknown tool", async () => {
+    const reg = notesRegistry();
+    const handle = mcp(reg, { name: "notes" });
+    const alone = createServer((req, res) => void handle(req, res, undefined));
+    await new Promise<void>((resolve) => alone.listen(0, "127.0.0.1", resolve));
+    const port = (alone.address() as AddressInfo).port;
+    const callTool = async (name: string) =>
+      (
+        await raw(port, {
+          method: "POST",
+          path: "/mcp",
+          headers: { "content-type": "application/json", accept: ACCEPT },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            method: "tools/call",
+            params: { name, arguments: { text: "x" } },
+          }),
+        })
+      ).json().result;
+    try {
+      const dotted = await callTool("note.add");
+      assert.equal(dotted.isError, true);
+      assert.equal(dotted.content[0].text, "unknown_action: no action named note.add");
+      assert.deepEqual(reg.run("note.list", {}, undefined), [], "nothing ran");
+      const advertised = await callTool("note_add");
+      assert.equal(advertised.isError, undefined);
+      assert.equal((reg.run("note.list", {}, undefined) as unknown[]).length, 1);
+    } finally {
+      alone.closeAllConnections();
+      await new Promise<void>((resolve) => alone.close(() => resolve()));
+    }
+  });
+
   test("tools/call with no tool name is a protocol error, not a tool error", async () => {
     const res = await post(JSON.stringify({ jsonrpc: "2.0", id: 5, method: "tools/call", params: {} }));
     assert.equal(res.json().error.code, -32602);

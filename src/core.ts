@@ -148,6 +148,8 @@ export interface Registry<
     info?: Partial<RunInfo>,
   ): RunOutput<H, D, N>;
   door(options: DoorOptions<Def, Caller>): Door<Def, Caller>;
+  /** the error for a name no action has, after the app's `error` hook, as a run would throw it */
+  unknown(name: string): Error;
   /**
    * hears every successful outermost mutating run, async ones once they resolve. A listener that
    * throws or rejects is logged and never breaks the run or the other listeners
@@ -310,6 +312,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     allows,
     run: run as Registry["run"],
     door,
+    unknown: (name) => problem({ kind: "unknown_action", name }),
     onChange(listener) {
       listeners.add(listener);
       return () => {

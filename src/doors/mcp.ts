@@ -193,9 +193,11 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
       throw invalidParams("tools/call arguments must be an object");
     }
     const args = params.arguments ?? {};
+    // only an advertised tool name runs: `x.add` is not the tool `x_add`, though it names its action
     const def = byTool.get(tool);
     try {
-      const rendered = await tools.run(def ? def.name : tool, args, caller);
+      if (!def) throw (reg as Registry).unknown(tool);
+      const rendered = await tools.run(def.name, args, caller);
       return { content: [{ type: "text", text: toolText(rendered) }] };
     } catch (err) {
       const shape = errorShape(err);
