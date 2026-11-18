@@ -212,7 +212,7 @@ describe("the same answers as the SDK's own server", () => {
   };
 
   test("initialize, for the latest, an older and an unknown version", async () => {
-    for (const protocolVersion of ["2025-11-25", "2025-03-26", "1999-01-01"]) {
+    for (const protocolVersion of ["2025-11-25", "2025-06-18", "1999-01-01"]) {
       const [a, b] = await both({
         jsonrpc: "2.0",
         id: 1,
@@ -372,6 +372,32 @@ describe("raw malformed requests", () => {
     assert.deepEqual(ok.json(), { jsonrpc: "2.0", id: 1, result: {} });
   });
 
+  // 2025-03-26 requires a receiver to take batches, which this door refuses, and 2024-10-07 has
+  // no published spec to meet, so neither is negotiated nor accepted in the version header
+  test("only versions whose contract this door meets are negotiated", async () => {
+    const init = (protocolVersion: string) =>
+      post(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion, capabilities: {}, clientInfo: { name: "t", version: "1" } },
+        }),
+      );
+    for (const kept of ["2025-11-25", "2025-06-18", "2024-11-05"]) {
+      assert.equal((await init(kept)).json().result.protocolVersion, kept, kept);
+    }
+    for (const dropped of ["2025-03-26", "2024-10-07"]) {
+      assert.equal((await init(dropped)).json().result.protocolVersion, "2025-11-25", dropped);
+      const later = await post(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }), {
+        "mcp-protocol-version": dropped,
+      });
+      assert.equal(later.status, 400, dropped);
+      assert.equal(later.json().error.code, -32000);
+      assert.match(later.json().error.message, /Unsupported protocol version/);
+    }
+  });
+
   test("an unknown method is a JSON-RPC error, kept apart from tool errors", async () => {
     const res = await post(JSON.stringify({ jsonrpc: "2.0", id: 4, method: "resources/list" }));
     assert.equal(res.status, 200);
@@ -471,7 +497,7 @@ describe("raw malformed requests", () => {
   });
 
   // batches left the transport in 2025-06-18: one message per POST. The SDK still runs them;
-  // this door refuses them before anything runs, on every version
+  // this door refuses them before anything runs, on every version it negotiates
   test("a batch is refused and nothing in it runs", async () => {
     const reg = notesRegistry();
     const handle = mcp(reg, { name: "notes" });
@@ -487,7 +513,7 @@ describe("raw malformed requests", () => {
       { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "note_add", arguments: { text: "x" } } },
     ];
     try {
-      for (const version of ["2025-11-25", "2025-06-18", "2025-03-26", undefined]) {
+      for (const version of ["2025-11-25", "2025-06-18", "2024-11-05", undefined]) {
         const headers: Record<string, string> = { "content-type": "application/json", accept: ACCEPT };
         if (version) headers["mcp-protocol-version"] = version;
         const read = await raw(port, { method: "POST", path: "/mcp", headers, body: JSON.stringify(batch) });

@@ -7,14 +7,13 @@ import type { AnyAction, Door, DoorOptions, Registry } from "../core.ts";
 import { errorShape } from "../errors.ts";
 import { createGuard, type GuardOptions } from "./guard.ts";
 
-/** the protocol versions this door speaks, newest first */
-export const PROTOCOL_VERSIONS = [
-  "2025-11-25",
-  "2025-06-18",
-  "2025-03-26",
-  "2024-11-05",
-  "2024-10-07",
-] as const;
+/**
+ * the protocol versions this door speaks, newest first. Only versions whose published contract
+ * it meets: 2025-03-26 is left out because its base protocol says implementations MUST support
+ * receiving JSON-RPC batches, which this door refuses, and 2024-10-07 has no published spec.
+ * 2025-06-18 and 2025-11-25 require one message per POST; 2024-11-05 requires no batches
+ */
+export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] as const;
 export const LATEST_PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 
 export interface McpOptions<Def = AnyAction, Caller = any>
@@ -274,7 +273,8 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
         );
       }
       const msg = body !== undefined ? body : await readBody(req, maxBody);
-      // one message per POST since 2025-06-18; a batch is refused before any of it runs
+      // one message per POST, as 2025-06-18 and later require; a batch is refused before any of it
+      // runs, which is why 2025-03-26, the version that requires taking batches, is not negotiated
       if (Array.isArray(msg)) {
         throw new RpcError(
           400,
