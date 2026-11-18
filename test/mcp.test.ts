@@ -82,6 +82,12 @@ describe("the MCP door through the official SDK client", () => {
     const out = await client.callTool({ name: "note_add", arguments: { text: 3 } });
     assert.equal(out.isError, true);
     assert.match(textOf(out), /^invalid_input: .*text/s);
+    // the issues come through as JSON after the message, as the HTTP door sends them
+    const issues = JSON.parse(textOf(out).split("\nissues: ")[1] ?? "null");
+    assert.deepEqual(
+      issues.map((i: { path: unknown[]; code: string }) => [i.path, i.code]),
+      [[["text"], "invalid_type"]],
+    );
   });
 
   test("a direct call to an unlisted tool is refused", async () => {

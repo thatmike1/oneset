@@ -289,7 +289,11 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     } catch (err) {
       const shape = errorShape(err);
       if (!shape) console.error("oneset: an MCP tool call failed", err);
-      const text = shape ? `${shape.code}: ${shape.message}` : "internal: something broke on the server";
+      // the issues an HTTP caller gets in its error body, as JSON after the one-line message
+      const issues = shape?.issues !== undefined ? `\n\nissues: ${JSON.stringify(shape.issues)}` : "";
+      const text = shape
+        ? `${shape.code}: ${shape.message}${issues}`
+        : "internal: something broke on the server";
       return { content: [{ type: "text", text }], isError: true };
     }
   }
