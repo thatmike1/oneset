@@ -9,11 +9,12 @@ import { createGuard, type GuardOptions } from "./guard.ts";
 
 /**
  * the protocol versions this door speaks, newest first. Only versions whose published contract
- * it meets: 2025-03-26 is left out because its base protocol says implementations MUST support
- * receiving JSON-RPC batches, which this door refuses, and 2024-10-07 has no published spec.
- * 2025-06-18 and 2025-11-25 require one message per POST; 2024-11-05 requires no batches
+ * it meets, which is the two with stateless streamable HTTP and one message per POST.
+ * 2025-03-26 is left out because its base protocol says implementations MUST support receiving
+ * JSON-RPC batches, which this door refuses; 2024-11-05 because its HTTP transport MUST provide
+ * an SSE endpoint, which this door does not serve; 2024-10-07 because it has no published spec
  */
-export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18", "2024-11-05"] as const;
+export const PROTOCOL_VERSIONS = ["2025-11-25", "2025-06-18"] as const;
 export const LATEST_PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 
 export interface McpOptions<Def = AnyAction, Caller = any>
@@ -131,16 +132,14 @@ function accepts(header: string, type: string): boolean {
   for (const range of header.split(",")) {
     const [media = "", ...params] = range.split(";").map((p) => p.trim().toLowerCase());
     if (media !== type) continue;
-    let weight = 1;
     // empty parameters are allowed between semicolons; a malformed one spoils the range
     const named = params.filter((p) => p !== "");
     if (!named.every((p) => PARAMETER.test(p))) continue;
-    for (const p of named) {
-      if (!p.startsWith("q=")) continue;
-      const q = p.slice(2);
-      weight = QVALUE.test(q) ? Number(q) : 0;
-    }
-    if (weight > 0) return true;
+    // a range has at most one weight: a repeated q spoils it instead of the last one winning
+    const weights = named.filter((p) => p.startsWith("q=")).map((p) => p.slice(2));
+    if (weights.length > 1) continue;
+    const [q] = weights;
+    if (q === undefined || (QVALUE.test(q) && Number(q) > 0)) return true;
   }
   return false;
 }

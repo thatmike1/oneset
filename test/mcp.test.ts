@@ -325,6 +325,9 @@ describe("raw malformed requests", () => {
       "application/json; q =1, text/event-stream",
       "application/json; q= 1, text/event-stream",
       "application/json; charset, text/event-stream",
+      // a repeated q never rescues a range: the later valid one must not override the first
+      "application/json;q=bogus;q=1, text/event-stream",
+      "application/json;q=0;q=1, text/event-stream",
     ]) {
       const res = await post(ping, { accept });
       assert.equal(res.status, 406, accept);
@@ -387,8 +390,9 @@ describe("raw malformed requests", () => {
     assert.deepEqual(ok.json(), { jsonrpc: "2.0", id: 1, result: {} });
   });
 
-  // 2025-03-26 requires a receiver to take batches, which this door refuses, and 2024-10-07 has
-  // no published spec to meet, so neither is negotiated nor accepted in the version header
+  // 2025-03-26 requires a receiver to take batches, which this door refuses; 2024-11-05's HTTP
+  // transport requires an SSE endpoint this door does not serve (GET is 405); 2024-10-07 has no
+  // published spec to meet. None of them is negotiated or accepted in the version header
   test("only versions whose contract this door meets are negotiated", async () => {
     const init = (protocolVersion: string) =>
       post(
@@ -399,10 +403,10 @@ describe("raw malformed requests", () => {
           params: { protocolVersion, capabilities: {}, clientInfo: { name: "t", version: "1" } },
         }),
       );
-    for (const kept of ["2025-11-25", "2025-06-18", "2024-11-05"]) {
+    for (const kept of ["2025-11-25", "2025-06-18"]) {
       assert.equal((await init(kept)).json().result.protocolVersion, kept, kept);
     }
-    for (const dropped of ["2025-03-26", "2024-10-07"]) {
+    for (const dropped of ["2025-03-26", "2024-11-05", "2024-10-07"]) {
       assert.equal((await init(dropped)).json().result.protocolVersion, "2025-11-25", dropped);
       const later = await post(JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }), {
         "mcp-protocol-version": dropped,
@@ -599,7 +603,7 @@ describe("raw malformed requests", () => {
       { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "note_add", arguments: { text: "x" } } },
     ];
     try {
-      for (const version of ["2025-11-25", "2025-06-18", "2024-11-05", undefined]) {
+      for (const version of ["2025-11-25", "2025-06-18", undefined]) {
         const headers: Record<string, string> = { "content-type": "application/json", accept: ACCEPT };
         if (version) headers["mcp-protocol-version"] = version;
         const read = await raw(port, { method: "POST", path: "/mcp", headers, body: JSON.stringify(batch) });
