@@ -225,11 +225,12 @@ export interface Registry<
   /** the error for a name no action has, after the app's `error` hook, as a run would throw it */
   unknown(name: string): Error;
   /**
-   * hears every successful outermost mutating run, async ones once they resolve, with the caller
-   * whose run made the change. A listener that throws or rejects is logged and never breaks the
-   * run or the other listeners
+   * hears every successful outermost mutating run, async ones once they resolve. A listener that
+   * throws or rejects is logged and never breaks the run or the other listeners
    */
-  onChange(listener: (change: Change, from: ChangeSource<Caller>) => unknown): () => void;
+  onChange(listener: (change: Change) => unknown): () => void;
+  /** the same, with a second argument saying whose run made the change, for scoping who hears it */
+  onChangeFrom(listener: (change: Change, from: ChangeSource<Caller>) => unknown): () => void;
 }
 
 /** what a client needs: every action's input and its awaited output, by name */
@@ -360,13 +361,16 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
   };
   const problem = (p: KitProblem<AnyAction>): Error => (hooks.error ?? defaultProblem)(p);
 
-  const listeners = new Set<(change: Change, from: ChangeSource) => unknown>();
+  // a listener from onChange gets the change alone, as it always has (a variadic one such as
+  // `list.push.bind(list)` must not record the caller too); one from onChangeFrom also gets the caller
+  // keyed by the function, so adding one twice still calls it once, as before
+  const listeners = new Map<(change: Change, from?: ChangeSource) => unknown, boolean>();
   const emit = (change: Change, caller: unknown): void => {
     const failed = (err: unknown) => console.error("oneset: a change listener failed", err);
-    for (const fn of listeners) {
+    for (const [fn, from] of listeners) {
       try {
         // an async listener's rejection is caught too, without waiting for it
-        const out: unknown = fn(change, { caller });
+        const out: unknown = from ? fn(change, { caller }) : fn(change);
         if (isThenable(out)) Promise.resolve(out).catch(failed);
       } catch (err) {
         failed(err);
@@ -675,9 +679,16 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     door,
     unknown: (name) => problem({ kind: "unknown_action", name }),
     onChange(listener) {
-      listeners.add(listener);
+      listeners.set(listener, false);
       return () => {
         listeners.delete(listener);
+      };
+    },
+    onChangeFrom(listener) {
+      const fn = listener as (change: Change, from?: ChangeSource) => unknown;
+      listeners.set(fn, true);
+      return () => {
+        listeners.delete(fn);
       };
     },
   };

@@ -20,7 +20,7 @@ export function openStream(
     "x-accel-buffering": "no",
   });
   res.write(": connected\n\n");
-  const off = reg.onChange((change, from) => {
+  const off = reg.onChangeFrom((change, from) => {
     const sent = heard(change, from);
     if (sent && !res.writableEnded) res.write(`event: change\ndata: ${JSON.stringify(sent)}\n\n`);
   });

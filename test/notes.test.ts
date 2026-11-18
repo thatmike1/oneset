@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { z } from "zod";
-import { ActionError, createRegistry, defineAction } from "../src/index.ts";
+import { ActionError, type Change, createRegistry, defineAction } from "../src/index.ts";
 import { notesActions, notesRegistry } from "./fixtures/notes.ts";
 
 const isThenable = (v: unknown) => typeof (v as { then?: unknown })?.then === "function";
@@ -313,6 +313,22 @@ describe("hooks", () => {
 });
 
 describe("change listeners", () => {
+  test("a listener written for one argument, even a variadic one, still gets only the change", () => {
+    const reg = notesRegistry();
+    const changes: Change[] = [];
+    reg.onChange(changes.push.bind(changes));
+    reg.run("note.add", { text: "a" }, { user: "editor" } as never);
+    assert.deepEqual(changes, [{ action: "note.add", door: "direct" }]);
+  });
+
+  test("onChangeFrom is the opt-in that also says whose run made the change", () => {
+    const reg = notesRegistry();
+    const heard: unknown[] = [];
+    reg.onChangeFrom((change, from) => heard.push([change.action, from.caller]));
+    reg.run("note.add", { text: "a" }, "editor" as never);
+    assert.deepEqual(heard, [["note.add", "editor"]]);
+  });
+
   test("fire once after a sync mutating run, never for a read", () => {
     const reg = notesRegistry();
     const changes: unknown[] = [];
