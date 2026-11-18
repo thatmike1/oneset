@@ -289,6 +289,35 @@ describe("the browser client", () => {
   });
 });
 
+describe("the browser client from the package", () => {
+  test("createClient takes the address, fetch and EventSource, so a tested module can use it", async () => {
+    const reg = notesRegistry();
+    const app = await serve(doors(reg, { name: "notes", base: "/kit" }));
+    const { createClient } = await import("../src/doors/browser.js");
+    const fetched: string[] = [];
+    const client = createClient({
+      url: `${app.url}/kit/`,
+      fetch: (url, init) => {
+        fetched.push(url);
+        return fetch(url, init);
+      },
+      EventSource: FetchEventSource,
+    });
+    const heard: unknown[] = [];
+    const stop = client.onChange((change) => heard.push(change));
+    try {
+      for (let i = 0; i < 100 && heard.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.deepEqual(await client.act("note.add", { text: "from a test" }), { id: 1, text: "from a test" });
+      for (let i = 0; i < 100 && heard.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+      assert.deepEqual(heard, [{ connected: true }, { action: "note.add", door: "http" }]);
+      assert.deepEqual(fetched, [`${app.url}/kit/api/actions/note.add`]);
+    } finally {
+      stop();
+      await app.close();
+    }
+  });
+});
+
 describe("the browser client's listeners", () => {
   test("an async listener that rejects is caught, and the later listeners still hear", async () => {
     const reg = notesRegistry();

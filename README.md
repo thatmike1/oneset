@@ -37,7 +37,7 @@ Run it with `pnpm build && node examples/notes/server.mjs`, then open `http://lo
 | `POST /mcp` | the MCP door (stateless streamable HTTP, hand-written; the SDK is a dev dependency only) |
 | `GET /cli/<name>.mjs` | a zero-dependency CLI with the app's name and address filled in |
 | `GET /skill/SKILL.md` | a Claude Code skill listing the MCP tools |
-| `GET /actions.js` | the browser client: `act(name, input)`, `onChange(fn)` |
+| `GET /actions.js` | the browser client: `act(name, input)`, `onChange(fn)`; also in the package as `oneset/client` |
 | `GET /api/actions/stream` | server-sent `change` events after every successful outermost mutating run |
 | `GET /setup` | the MCP, CLI and skill lines to paste once |
 
@@ -51,6 +51,7 @@ A `base` option moves them all under a prefix.
 - `reg.door({ name, list, describe, render, draft })` makes a door an app can use itself: `catalog(caller)` and `run(name, input, caller)`, which refuses what it does not list.
 - `ActionError(status, code, message, { issues, body, headers })` is the one error to throw. Doors render any thrown error by its `status`, `code`, `message` and `issues`.
 - `doors(reg, options)` mounts everything behind the guard (foreign Host and Origin refused, JSON bodies only, bodies capped). `hosts` and `origins` widen it; a non-loopback host with no `caller` refuses to start unless `openWithoutSignIn: true`.
+- `oneset/client` is the browser client from the package. Its `createClient({ url, fetch, EventSource })` makes a client a module can be handed, so code that node tests import can use it with a test server and an EventSource stand-in; the page itself still loads `/actions.js`. `onChange` listeners hear `{ action, door }` for a run, `{ connected: true }` once the stream is live and `{ reconnected: true }` after a drop; a listener that keeps fetched state refetches on all three.
 - `mcp(reg, options)` from `oneset/doors` is the MCP door alone, `(req, res, caller, body?)`, for apps that keep their own routes and resolve their caller themselves. It keeps the same Host and Origin guard and takes the same `hosts`, `origins` and `maxBody`, so an app behind a proxy passes its public host in `hosts`. `handle.resolving(req, res, resolve, body?)` takes a function instead of a caller and calls it only once the request has passed the door's own checks, which is how `doors()` mounts it.
 
 ## Tests

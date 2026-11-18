@@ -1,6 +1,7 @@
 // compiled against the packed tarball: every @ts-expect-error below must be an error, and
 // everything else must compile
 import { type ActionDef, ActionError, type ActionsOf, kit } from "oneset";
+import { createClient } from "oneset/client";
 import { z } from "zod";
 
 type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false;
@@ -170,3 +171,10 @@ act("note.later", { n: 2 }).then((out) => out.n.toFixed());
 act("note.gone", {});
 // @ts-expect-error nor send a wrong field
 act("note.later", { m: 2 });
+
+// the package's browser client, typed by the same view
+const client = createClient<Actions>({ url: "http://127.0.0.1:1" });
+client.act("note.later", { n: 2 }).then((out) => out.n.toFixed());
+// @ts-expect-error the typed client knows the names
+client.act("note.gone", {});
+client.onChange((change) => (change.action ? change.door.length : change.connected));

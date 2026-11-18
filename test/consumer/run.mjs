@@ -29,6 +29,10 @@ try {
     const res = await fetch(base + path);
     if (res.status !== 200) throw new Error(`${path} answered ${res.status}`);
   }
+  // the browser client from the package, pointed at the app
+  const { createClient } = await import("oneset/client");
+  const note = await createClient({ url: base }).act("note.add", { text: "from the client" });
+  if (note.text !== "from the client") throw new Error("the packaged client got the wrong result");
 } finally {
   server.close();
 }
