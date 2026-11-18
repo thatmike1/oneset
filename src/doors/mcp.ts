@@ -118,14 +118,29 @@ const isObject = (v: unknown): v is Record<string, unknown> =>
 
 const invalidParams = (message: string) => new RpcError(200, -32602, `Invalid params: ${message}`);
 
-/** whether an Accept header takes this media type: a matching range with q above 0, no wildcards */
+// RFC 9110: parameter = token "=" ( token / quoted-string ), no space around "=" (5.6.6), and
+// qvalue = ( "0" [ "." 0*3DIGIT ] ) / ( "1" [ "." 0*3("0") ] ) (12.4.2)
+const PARAMETER = /^[!#$%&'*+.^_`|~0-9a-z-]+=(?:[!#$%&'*+.^_`|~0-9a-z-]+|"(?:[^"\\]|\\.)*")$/;
+const QVALUE = /^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/;
+
+/**
+ * whether an Accept header takes this media type: a matching range, no wildcards, whose
+ * parameters all parse and whose qvalue, when it has one, is a valid one above 0
+ */
 function accepts(header: string, type: string): boolean {
   for (const range of header.split(",")) {
     const [media = "", ...params] = range.split(";").map((p) => p.trim().toLowerCase());
     if (media !== type) continue;
-    const q = params.find((p) => p.startsWith("q="));
-    // a q that does not parse is read as refusal, not as the default 1
-    if (q === undefined || Number(q.slice(2)) > 0) return true;
+    let weight = 1;
+    // empty parameters are allowed between semicolons; a malformed one spoils the range
+    const named = params.filter((p) => p !== "");
+    if (!named.every((p) => PARAMETER.test(p))) continue;
+    for (const p of named) {
+      if (!p.startsWith("q=")) continue;
+      const q = p.slice(2);
+      weight = QVALUE.test(q) ? Number(q) : 0;
+    }
+    if (weight > 0) return true;
   }
   return false;
 }

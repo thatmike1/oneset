@@ -312,6 +312,19 @@ describe("raw malformed requests", () => {
       "application/jsonx, text/event-stream",
       "text/event-stream-ish, application/json",
       "application/json;q=nope, text/event-stream",
+      // outside the RFC 9110 qvalue grammar, or a parameter that is not one
+      "application/json;q=2, text/event-stream",
+      "application/json;q=0x1, text/event-stream",
+      "application/json;q=1e-3, text/event-stream",
+      "application/json;q=1.0001, text/event-stream",
+      "application/json;q=0.0001, text/event-stream",
+      "application/json;q=.5, text/event-stream",
+      "application/json;q=-0, text/event-stream",
+      "application/json;q=0., text/event-stream",
+      "application/json; q = 0, text/event-stream",
+      "application/json; q =1, text/event-stream",
+      "application/json; q= 1, text/event-stream",
+      "application/json; charset, text/event-stream",
     ]) {
       const res = await post(ping, { accept });
       assert.equal(res.status, 406, accept);
@@ -320,6 +333,8 @@ describe("raw malformed requests", () => {
       "Application/JSON; charset=utf-8, Text/Event-Stream;q=0.5",
       "text/event-stream , application/json;q=1",
       "text/html, application/json;q=0.9, text/event-stream;q=0.001",
+      'application/json; charset="utf-8" ;Q=1.000, text/event-stream;q=1.',
+      "application/json;;q=0.5, text/event-stream\t;\tq=0.25",
     ]) {
       const res = await post(ping, { accept });
       assert.equal(res.status, 200, accept);
