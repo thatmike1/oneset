@@ -62,10 +62,16 @@ export function browserSource(app: AppInfo): string {
   return fill("browser.js", "SETTINGS", { url: app.url });
 }
 
+/** a word as the shell reads it back unchanged: as is when it is plainly safe, else single-quoted */
+export function shellWord(word: string): string {
+  return /^[\w@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+}
+
 export function setupLines(app: AppInfo) {
   const key = app.signIn;
+  const at = (path: string) => shellWord(`${app.url}${path}`);
   // user scope: without it Claude Code adds the server only for the folder the terminal is in
-  const add = `claude mcp add --scope user --transport http ${app.slug} ${app.url}/mcp`;
+  const add = `claude mcp add --scope user --transport http ${app.slug} ${at("/mcp")}`;
   const mcp = key ? `${add} --header "Authorization: Bearer <agent key>"` : add;
   const mcpJson = JSON.stringify(
     {
@@ -82,10 +88,10 @@ export function setupLines(app: AppInfo) {
   );
   const auth = key ? ' -H "Authorization: Bearer <agent key>"' : "";
   const cli =
-    `mkdir -p ~/.local/bin && curl -fsSL ${app.url}/cli/${app.slug}.mjs -o ~/.local/bin/${app.slug} ` +
-    `&& chmod +x ~/.local/bin/${app.slug}${key ? ` && ${app.slug} login ${app.url} "<agent key>"` : ""}`;
+    `mkdir -p ~/.local/bin && curl -fsSL ${at(`/cli/${app.slug}.mjs`)} -o ~/.local/bin/${app.slug} ` +
+    `&& chmod +x ~/.local/bin/${app.slug}${key ? ` && ${app.slug} login ${at("")} "<agent key>"` : ""}`;
   const skill =
-    `mkdir -p ~/.claude/skills/${app.slug} && curl -fsSL${auth} ${app.url}/skill/SKILL.md ` +
+    `mkdir -p ~/.claude/skills/${app.slug} && curl -fsSL${auth} ${at("/skill/SKILL.md")} ` +
     `-o ~/.claude/skills/${app.slug}/SKILL.md`;
   return { mcp, mcpJson, cli, skill };
 }

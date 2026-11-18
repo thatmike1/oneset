@@ -166,6 +166,31 @@ describe("the CLI with an agent key", () => {
 });
 
 describe("the setup lines", () => {
+  test("a url with shell characters is quoted, and the shell reads it back unchanged", async () => {
+    for (const url of [
+      "https://example.test/notes(v2)",
+      "https://example.test/a&b",
+      "https://example.test/it's",
+    ]) {
+      for (const signIn of [false, true]) {
+        const lines = setupLines({ name: "Test", slug: "test", url, signIn });
+        for (const [kind, line] of Object.entries({ mcp: lines.mcp, cli: lines.cli, skill: lines.skill })) {
+          const parsed = await run("bash", ["-n", "-c", line]).then(
+            () => "ok",
+            (err: { stderr: string }) => err.stderr,
+          );
+          assert.equal(parsed, "ok", `${kind} line, ${url}: ${line}`);
+        }
+        // the quoted address is the address: print the words bash would pass to claude
+        const words = await run("bash", [
+          "-c",
+          `set -- ${lines.mcp.replace(/^claude /, "")}; printf '%s\\n' "$@"`,
+        ]);
+        assert.ok(words.stdout.split("\n").includes(`${url}/mcp`), words.stdout);
+      }
+    }
+  });
+
   test("every shell line parses, with and without a key", async () => {
     for (const signIn of [false, true]) {
       const lines = setupLines({ name: "Keyed", slug: "keyed", url: "http://127.0.0.1:9/kit", signIn });
