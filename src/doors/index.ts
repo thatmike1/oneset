@@ -5,7 +5,7 @@ import type { AnyAction, DoorOptions, Registry } from "../core.ts";
 import { ActionError } from "../errors.ts";
 import { type AppInfo, browserSource, cliSource, setupPage, skillMarkdown, slugOf } from "./files.ts";
 import { createGuard, type GuardOptions, isLoopback } from "./guard.ts";
-import { mcp } from "./mcp.ts";
+import { mcp, sendRefusal } from "./mcp.ts";
 import { sendError, sendJson, sendText } from "./respond.ts";
 import { openStream } from "./stream.ts";
 
@@ -91,6 +91,8 @@ export function doors<R extends Registry<any, any, any, any, any>>(
     name: opts.name,
     ...(opts.instructions ? { instructions: opts.instructions } : {}),
     ...(opts.maxBody ? { maxBody: opts.maxBody } : {}),
+    ...(opts.hosts ? { hosts: opts.hosts } : {}),
+    ...(opts.origins ? { origins: opts.origins } : {}),
   });
   const resolve = async (req: IncomingMessage, door: DoorKind) =>
     opts.caller ? opts.caller(req, door) : undefined;
@@ -157,7 +159,14 @@ export function doors<R extends Registry<any, any, any, any, any>>(
     const r = route(path, method);
     if (!r) return false;
     try {
-      guard.check(req);
+      // the guard answers before any caller is resolved; at /mcp in MCP's own error shape
+      try {
+        guard.check(req);
+      } catch (err) {
+        if (r.kind !== "mcp") throw err;
+        sendRefusal(res, err as ActionError);
+        return true;
+      }
       if (r.kind === "mcp") {
         await mcpHandle(req, res, await resolve(req, "mcp"));
         return true;

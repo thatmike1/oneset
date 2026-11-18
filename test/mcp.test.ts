@@ -387,11 +387,16 @@ describe("raw malformed requests", () => {
     }
   });
 
-  test("the guard still applies in front of it", async () => {
-    const res = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }), {
-      origin: "https://evil.example",
-    });
-    assert.equal(res.status, 403);
+  test("the guard still applies in front of it, answering in MCP's error shape", async () => {
+    for (const headers of [{ origin: "https://evil.example" }, { host: "evil.example" }] as Record<
+      string,
+      string
+    >[]) {
+      const res = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }), headers);
+      assert.equal(res.status, 403);
+      assert.equal(res.json().error.code, -32000);
+      assert.equal(res.json().id, null);
+    }
   });
 });
 
@@ -489,5 +494,90 @@ describe("the MCP door mounted alone, with a caller the app resolved", () => {
       });
     });
     assert.deepEqual(JSON.parse(res.body), { jsonrpc: "2.0", id: 7, result: {} });
+  });
+});
+
+describe("the MCP door mounted alone keeps the guard", () => {
+  const ACCEPT = "application/json, text/event-stream";
+  const call = JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "note_add", arguments: { text: "x" } },
+  });
+  /** a server that mounts mcp() alone and hands it the caller, the way Tandem and diskzokej do */
+  async function alone(options: { hosts?: string[]; origins?: string[] }, caller: unknown) {
+    const reg = notesRegistry();
+    const handle = mcp(reg, { name: "notes", ...options });
+    const server = createServer((req, res) => void handle(req, res, caller));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    return {
+      port,
+      count: () => (reg.run("note.list", {}, caller) as unknown[]).length,
+      post: (headers: Record<string, string> = {}) =>
+        raw(port, {
+          method: "POST",
+          path: "/mcp",
+          headers: { "content-type": "application/json", accept: ACCEPT, ...headers },
+          body: call,
+        }),
+      close: () =>
+        new Promise<void>((resolve) => {
+          server.closeAllConnections();
+          server.close(() => resolve());
+        }),
+    };
+  }
+
+  for (const [label, caller] of [
+    ["without a caller", undefined],
+    ["with a caller", { user: "mike" }],
+  ] as const) {
+    test(`a foreign Host or Origin is refused before anything runs, ${label}`, async () => {
+      const app = await alone({}, caller);
+      try {
+        for (const headers of [
+          { host: "evil.example" } as Record<string, string>,
+          { host: `localhost:${app.port + 1}` },
+          { origin: "https://evil.example" },
+          { origin: `http://localhost:${app.port + 1}` },
+          { origin: "null" },
+          { host: "evil.example", origin: "https://evil.example" },
+        ]) {
+          const res = await app.post(headers);
+          assert.equal(res.status, 403, JSON.stringify(headers));
+          assert.equal(res.json().jsonrpc, "2.0");
+          assert.equal(res.json().error.code, -32000);
+          assert.equal(res.json().id, null);
+        }
+        assert.equal(app.count(), 0, "nothing ran");
+        // no Origin, a same-origin page and the loopback names still pass
+        assert.equal((await app.post()).status, 200);
+        assert.equal((await app.post({ origin: `http://localhost:${app.port}` })).status, 200);
+        assert.equal((await app.post({ host: `[::1]:${app.port}` })).status, 200);
+        assert.equal(app.count(), 3);
+      } finally {
+        await app.close();
+      }
+    });
+  }
+
+  test("hosts and origins widen it, as they do for doors()", async () => {
+    const app = await alone(
+      { hosts: ["notes.example.com"], origins: ["https://chatgpt.com"] },
+      { user: "mike" },
+    );
+    try {
+      assert.equal(
+        (await app.post({ host: "notes.example.com", origin: "https://notes.example.com" })).status,
+        200,
+      );
+      assert.equal((await app.post({ origin: "https://chatgpt.com" })).status, 200);
+      assert.equal((await app.post({ host: "other.example.com" })).status, 403);
+      assert.equal((await app.post({ origin: "https://claude.ai" })).status, 403);
+    } finally {
+      await app.close();
+    }
   });
 });

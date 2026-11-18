@@ -5,6 +5,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { AnyAction, Door, DoorOptions, Registry } from "../core.ts";
 import { errorShape } from "../errors.ts";
+import { createGuard, type GuardOptions } from "./guard.ts";
 
 /** the protocol versions this door speaks, newest first */
 export const PROTOCOL_VERSIONS = [
@@ -16,15 +17,15 @@ export const PROTOCOL_VERSIONS = [
 ] as const;
 export const LATEST_PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 
-export interface McpOptions<Def = AnyAction, Caller = any> extends Omit<DoorOptions<Def, Caller>, "name"> {
+export interface McpOptions<Def = AnyAction, Caller = any>
+  extends Omit<DoorOptions<Def, Caller>, "name">,
+    GuardOptions {
   /** the server name agents see */
   name: string;
   /** default 1.0.0 */
   version?: string;
   /** how an agent should use these tools, sent in `initialize` */
   instructions?: string;
-  /** the largest body accepted, in bytes, when the handler reads it itself; default 1 MiB */
-  maxBody?: number;
 }
 
 /** answers one MCP request for a caller the app already resolved; `body` when the app read it already */
@@ -68,6 +69,14 @@ function sendRpc(
 ): void {
   res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store", ...headers });
   res.end(JSON.stringify(body));
+}
+
+/**
+ * the guard's Host and Origin refusal as MCP answers it: 403 with a JSON-RPC error and no id.
+ * `doors()` sends its own /mcp refusals through this too, so both mounts answer alike
+ */
+export function sendRefusal(res: ServerResponse, err: { status: number; message: string }): void {
+  sendRpc(res, err.status, { jsonrpc: "2.0", error: { code: -32000, message: err.message }, id: null });
 }
 
 function isMessage(m: unknown): m is Message {
@@ -138,8 +147,12 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
     instructions,
     maxBody = 1024 * 1024,
     draft = "draft-7",
+    hosts,
+    origins,
     ...door
   } = options as McpOptions;
+  // the same guard doors() puts in front of every path, so a standalone mount keeps it
+  const guard = createGuard({ ...(hosts ? { hosts } : {}), ...(origins ? { origins } : {}) });
   const tools = (reg as Registry).door({ ...door, draft, name: "mcp" });
   const byTool = new Map((reg as Registry).actions.map((def) => [def.name.replaceAll(".", "_"), def]));
 
@@ -189,6 +202,12 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
   }
 
   const handle = async (req: IncomingMessage, res: ServerResponse, caller: unknown, body?: unknown) => {
+    try {
+      guard.check(req);
+    } catch (err) {
+      sendRefusal(res, err as { status: number; message: string });
+      return;
+    }
     try {
       if (req.method !== "POST") {
         throw new RpcError(405, -32000, "Method not allowed.", { allow: "POST" });
