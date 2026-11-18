@@ -297,6 +297,30 @@ describe("raw malformed requests", () => {
     assert.equal(none.status, 406);
   });
 
+  test("Accept is read as media ranges, not searched for substrings", async () => {
+    const ping = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" });
+    for (const accept of [
+      "application/json;q=0, text/event-stream;q=0",
+      "application/json, text/event-stream;q=0",
+      "application/json;q=0.000, text/event-stream",
+      "application/json-seq, text/event-stream",
+      "application/jsonx, text/event-stream",
+      "text/event-stream-ish, application/json",
+      "application/json;q=nope, text/event-stream",
+    ]) {
+      const res = await post(ping, { accept });
+      assert.equal(res.status, 406, accept);
+    }
+    for (const accept of [
+      "Application/JSON; charset=utf-8, Text/Event-Stream;q=0.5",
+      "text/event-stream , application/json;q=1",
+      "text/html, application/json;q=0.9, text/event-stream;q=0.001",
+    ]) {
+      const res = await post(ping, { accept });
+      assert.equal(res.status, 200, accept);
+    }
+  });
+
   test("a wrong Content-Type is refused", async () => {
     const res = await post(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "ping" }), {
       "content-type": "text/plain",
@@ -351,6 +375,55 @@ describe("raw malformed requests", () => {
       id: 4,
       error: { code: -32601, message: "Method not found: resources/list" },
     });
+  });
+
+  test("initialize with missing or mistyped params is an invalid-params error", async () => {
+    const good = { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "t", version: "1" } };
+    for (const params of [
+      undefined,
+      [],
+      {},
+      { ...good, protocolVersion: undefined },
+      { ...good, protocolVersion: 20251125 },
+      { ...good, capabilities: undefined },
+      { ...good, capabilities: [] },
+      { ...good, capabilities: null },
+      { ...good, clientInfo: undefined },
+      { ...good, clientInfo: "t" },
+      { ...good, clientInfo: { name: "t" } },
+      { ...good, clientInfo: { name: 1, version: "1" } },
+    ]) {
+      const msg: Record<string, unknown> = { jsonrpc: "2.0", id: 2, method: "initialize" };
+      if (params !== undefined) msg.params = params;
+      const res = await post(JSON.stringify(msg));
+      assert.equal(res.status, 200, JSON.stringify(params));
+      assert.equal(res.json().error?.code, -32602, JSON.stringify(params));
+      assert.equal(res.json().id, 2);
+    }
+    // a well-formed initialize for a version this door does not know still negotiates
+    const unknown = await post(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 3,
+        method: "initialize",
+        params: { ...good, protocolVersion: "1999-01-01" },
+      }),
+    );
+    assert.equal(unknown.json().result.protocolVersion, "2025-11-25");
+  });
+
+  test("params that are not an object, or tool arguments that are not one, are invalid params", async () => {
+    for (const msg of [
+      { jsonrpc: "2.0", id: 6, method: "ping", params: [] },
+      { jsonrpc: "2.0", id: 6, method: "tools/list", params: [] },
+      { jsonrpc: "2.0", id: 6, method: "tools/call", params: ["note_count"] },
+      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "note_count", arguments: [] } },
+      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "note_count", arguments: "x" } },
+      { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "note_count", arguments: null } },
+    ]) {
+      const res = await post(JSON.stringify(msg));
+      assert.equal(res.json().error?.code, -32602, JSON.stringify(msg));
+    }
   });
 
   test("tools/call with no tool name is a protocol error, not a tool error", async () => {

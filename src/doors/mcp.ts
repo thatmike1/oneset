@@ -112,6 +112,36 @@ async function readBody(req: IncomingMessage, maxBody: number): Promise<unknown>
   }
 }
 
+const METHODS = new Set(["initialize", "ping", "tools/list", "tools/call"]);
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
+
+const invalidParams = (message: string) => new RpcError(200, -32602, `Invalid params: ${message}`);
+
+/** whether an Accept header takes this media type: a matching range with q above 0, no wildcards */
+function accepts(header: string, type: string): boolean {
+  for (const range of header.split(",")) {
+    const [media = "", ...params] = range.split(";").map((p) => p.trim().toLowerCase());
+    if (media !== type) continue;
+    const q = params.find((p) => p.startsWith("q="));
+    // a q that does not parse is read as refusal, not as the default 1
+    if (q === undefined || Number(q.slice(2)) > 0) return true;
+  }
+  return false;
+}
+
+/** the required fields of initialize's params, per the 2025-11-25 schema */
+function checkInitialize(params: Record<string, unknown>): void {
+  if (typeof params.protocolVersion !== "string")
+    throw invalidParams("initialize needs a protocolVersion string");
+  if (!isObject(params.capabilities)) throw invalidParams("initialize needs a capabilities object");
+  const client = params.clientInfo;
+  if (!isObject(client) || typeof client.name !== "string" || typeof client.version !== "string") {
+    throw invalidParams("initialize needs clientInfo with a name and a version");
+  }
+}
+
 const toolText = (rendered: unknown): string =>
   typeof rendered === "string" ? rendered : rendered === undefined ? "" : JSON.stringify(rendered, null, 2);
 
@@ -158,8 +188,10 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
 
   async function callTool(params: Record<string, unknown>, caller: unknown): Promise<unknown> {
     const tool = params.name;
-    if (typeof tool !== "string")
-      throw new RpcError(200, -32602, "Invalid params: tools/call needs a tool name");
+    if (typeof tool !== "string") throw invalidParams("tools/call needs a tool name");
+    if ("arguments" in params && !isObject(params.arguments)) {
+      throw invalidParams("tools/call arguments must be an object");
+    }
     const args = params.arguments ?? {};
     const def = byTool.get(tool);
     try {
@@ -174,9 +206,13 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
   }
 
   async function answer(msg: Message, caller: unknown): Promise<unknown> {
+    if (!METHODS.has(msg.method ?? "")) throw new RpcError(200, -32601, `Method not found: ${msg.method}`);
+    // every MCP method takes named params: an object or nothing
+    if (msg.params !== undefined && !isObject(msg.params)) throw invalidParams("params must be an object");
     const params = msg.params ?? {};
     switch (msg.method) {
       case "initialize": {
+        checkInitialize(params);
         const asked = params.protocolVersion;
         const protocolVersion =
           typeof asked === "string" && (PROTOCOL_VERSIONS as readonly string[]).includes(asked)
@@ -213,7 +249,7 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
         throw new RpcError(405, -32000, "Method not allowed.", { allow: "POST" });
       }
       const accept = String(req.headers.accept ?? "");
-      if (!accept.includes("application/json") || !accept.includes("text/event-stream")) {
+      if (!accepts(accept, "application/json") || !accepts(accept, "text/event-stream")) {
         throw new RpcError(
           406,
           -32000,
