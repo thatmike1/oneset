@@ -195,7 +195,10 @@ describe("the skill", () => {
       `name: notes\ndescription: "notes: Use when the person mentions their notes: lists, reminders, things to keep."\n`,
     );
     assert.match(body ?? "", /^\n# notes\n\nAdd notes with note_add; read them with note_list\.\n/);
-    assert.match(body ?? "", /claude mcp add --transport http notes http:\/\/127\.0\.0\.1:\d+\/mcp/);
+    assert.match(
+      body ?? "",
+      /claude mcp add --scope user --transport http notes http:\/\/127\.0\.0\.1:\d+\/mcp/,
+    );
     assert.match(body ?? "", /- `note_add` \(CLI `notes note\.add`\): Add a note\n/);
     assert.ok(!(body ?? "").includes("note_fail"), "tools the MCP door hides stay out");
   });
@@ -321,7 +324,7 @@ describe("the setup page", () => {
       assert.equal(res.status, 200);
       assert.match(String(res.headers["content-type"]), /^text\/html/);
       const url = `http://127.0.0.1:${app.port}`;
-      assert.ok(res.text.includes(`claude mcp add --transport http notes ${url}/mcp`));
+      assert.ok(res.text.includes(`claude mcp add --scope user --transport http notes ${url}/mcp`));
       assert.ok(res.text.includes(`&quot;url&quot;: &quot;${url}/mcp&quot;`));
       assert.ok(res.text.includes(`curl -fsSL ${url}/cli/notes.mjs -o ~/.local/bin/notes`));
       assert.ok(res.text.includes(`curl -fsSL ${url}/skill/SKILL.md -o ~/.claude/skills/notes/SKILL.md`));
@@ -373,7 +376,9 @@ describe("base and url", () => {
     );
     try {
       const res = await raw(app.port, { path: "/setup", headers: { host: "notes.example.com" } });
-      assert.ok(res.text.includes("claude mcp add --transport http notes https://notes.example.com/mcp"));
+      assert.ok(
+        res.text.includes("claude mcp add --scope user --transport http notes https://notes.example.com/mcp"),
+      );
     } finally {
       await app.close();
     }

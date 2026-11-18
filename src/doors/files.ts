@@ -58,9 +58,9 @@ export function browserSource(app: AppInfo): string {
 
 export function setupLines(app: AppInfo) {
   const key = app.signIn;
-  const mcp = key
-    ? `claude mcp add --transport http ${app.slug} ${app.url}/mcp --header "Authorization: Bearer <agent key>"`
-    : `claude mcp add --transport http ${app.slug} ${app.url}/mcp`;
+  // user scope: without it Claude Code adds the server only for the folder the terminal is in
+  const add = `claude mcp add --scope user --transport http ${app.slug} ${app.url}/mcp`;
+  const mcp = key ? `${add} --header "Authorization: Bearer <agent key>"` : add;
   const mcpJson = JSON.stringify(
     {
       mcpServers: {
@@ -141,7 +141,11 @@ export function setupPage(app: AppInfo): string {
 <h1>Give an agent ${escapeHtml(app.name)}</h1>
 <p>Paste each line once on the machine the agent runs on.${
     app.signIn ? " Replace &lt;agent key&gt; with a key from the app." : " No sign-in or key needed."
-  }</p>${block("MCP, for Claude Code", lines.mcp)}${block(
+  }</p>${block(
+    "MCP, for Claude Code",
+    lines.mcp,
+    "User scope, so every Claude Code session has it, whatever folder it starts in.",
+  )}${block(
     "MCP, for other clients",
     lines.mcpJson,
     "The same server as JSON config.",
