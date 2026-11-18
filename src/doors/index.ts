@@ -32,6 +32,8 @@ export type DoorSettings<Def = AnyAction, Caller = any> = Omit<DoorOptions<Def, 
 interface BaseOptions<Def, Caller> extends GuardOptions {
   /** the app's name: the MCP server name, the CLI's file and command, the skill's name */
   name: string;
+  /** the app's version, which MCP clients see beside its name; default 1.0.0 */
+  version?: string;
   /** how an agent should use the tools: MCP `instructions` and the skill's body */
   instructions?: string;
   /** when an agent should reach for them: the skill's trigger line */
@@ -47,7 +49,7 @@ interface BaseOptions<Def, Caller> extends GuardOptions {
   openWithoutSignIn?: boolean;
   /** options for the HTTP door: `list`, `describe`, `render`, `draft` */
   http?: DoorSettings<Def, Caller>;
-  /** options for the MCP door: `list`, `describe`, `render`, `draft` (default draft-7), `version` */
+  /** options for the MCP door: `list`, `describe`, `render`, `draft` (default draft-7), `version` (the top-level one wins) */
   mcp?: DoorSettings<Def, Caller> & { version?: string };
 }
 
@@ -101,6 +103,7 @@ export function doors<R extends Registry<any, any, any, any, any>>(
   const mcpHandle = mcp(registry, {
     ...(opts.mcp as DoorSettings),
     name: opts.name,
+    ...(opts.version !== undefined ? { version: opts.version } : {}),
     ...(opts.instructions ? { instructions: opts.instructions } : {}),
     // 0 is a cap too, so only a missing one falls back to the default
     ...(opts.maxBody !== undefined ? { maxBody: opts.maxBody } : {}),

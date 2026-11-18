@@ -49,6 +49,17 @@ describe("the MCP door through the official SDK client", () => {
     assert.deepEqual(client.getServerCapabilities(), { tools: {} });
   });
 
+  test("the server version comes from doors' own version option", async () => {
+    const versioned = await serve(doors(notesRegistry(), { name: "notes", version: "2.3.0" }));
+    const other = await connect(`${versioned.url}/mcp`);
+    try {
+      assert.deepEqual(other.getServerVersion(), { name: "notes", version: "2.3.0" });
+    } finally {
+      await other.close();
+      await versioned.close();
+    }
+  });
+
   test("lists the tools it lists, with draft-7 schemas and annotations", async () => {
     const { tools } = await client.listTools();
     assert.deepEqual(
