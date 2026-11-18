@@ -129,6 +129,17 @@ describe("an app-written door", () => {
     );
   });
 
+  test("one run through a door calls allow once", () => {
+    const calls: string[] = [];
+    const counted = createRegistry(actions, {
+      allow(def) {
+        calls.push(def.name);
+      },
+    });
+    counted.door({ name: "once" }).run("set.play", { ids: ["a"] }, djCaller);
+    assert.deepEqual(calls, ["set.play"]);
+  });
+
   test("an unknown name is the kit's unknown_action, not a refusal", () => {
     assert.throws(
       () => dj.run("nope.nope", {}, djCaller),

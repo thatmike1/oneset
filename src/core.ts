@@ -317,12 +317,12 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       run(name, input, caller) {
         const def = byName.get(name);
         if (!def) throw problem({ kind: "unknown_action", name });
-        if (!lists(def, caller)) {
-          // allow's own error is what the caller gets when it applies
-          authorize(def, caller);
+        // allow runs once: its own error is what the caller gets, and only then the door's list rule
+        authorize(def, caller);
+        if (options.list && !options.list(def, caller)) {
           throw new ActionError(403, "not_listed", `${name} is not available through ${options.name}`);
         }
-        const out = run(name, input, caller, { door: options.name });
+        const out = runAllowed(def, input, caller, { door: options.name });
         return isThenable(out) ? Promise.resolve(out).then((v) => render(def, v)) : render(def, out);
       },
     };
