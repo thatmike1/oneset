@@ -60,10 +60,12 @@ export function createClient(options = {}) {
     const data = await request("POST", `/api/actions/${encodeURIComponent(name)}`, input);
     if (!data.job) return data.result;
     if (options.wait === false) return data.job;
-    let job = data.job;
-    while (job.state === "running") {
-      job = (await request("POST", "/api/actions/job.get", { id: job.id })).result;
-    }
+    // the start's answer carries no result, so the job is read at least once
+    const { id } = data.job;
+    let job;
+    do {
+      job = (await request("POST", "/api/actions/job.get", { id })).result;
+    } while (job.state === "running");
     if (job.state === "failed") {
       const error = job.error ?? {};
       throw new ActionError(

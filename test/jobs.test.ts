@@ -552,4 +552,31 @@ describe("long actions, after review", () => {
       await app.close();
     }
   });
+
+  test("a long action that finishes at once keeps its ticket when the renderer throws", async () => {
+    const reg = createRegistry([
+      defineAction({
+        name: "x.quick",
+        area: "x",
+        summary: "quick",
+        mutates: false,
+        long: true,
+        input: z.object({}),
+        run: () => 4,
+      }),
+    ]);
+    const door = reg.door({
+      name: "page",
+      render: () => {
+        throw new Error("render failed");
+      },
+    });
+    const started = door.run("x.quick", {}, undefined) as { job: JobView };
+    assert.deepEqual(Object.keys(started.job).sort(), ["action", "finished", "id", "started", "state"]);
+    assert.equal(started.job.state, "done");
+    // the reading door renders, and its renderer's failure is that read's error, not the job's
+    assert.throws(() => door.run("job.get", { id: started.job.id }, undefined), /render failed/);
+    const plain = reg.door({ name: "plain" });
+    assert.equal(((await plain.run("job.get", { id: started.job.id }, undefined)) as JobView).result, 4);
+  });
 });

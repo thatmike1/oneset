@@ -452,6 +452,21 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
     return job;
   }
 
+  /**
+   * the start's answer: who the job is and its state, nothing rendered, so a renderer cannot cost
+   * the caller its id. The result or error is read with job.get
+   */
+  function ticketOf(job: Job): JobView {
+    const ticket: JobView = {
+      id: job.id,
+      action: job.def.name,
+      state: job.state,
+      started: new Date(job.started).toISOString(),
+    };
+    if (job.finished !== undefined) ticket.finished = new Date(job.finished).toISOString();
+    return ticket;
+  }
+
   /** the job as job.get answers it; a promise when the door's renderer returns one */
   function viewOf(
     job: Job,
@@ -571,7 +586,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
         }
         const data = validate(def, input);
         // a long action answers with its job at once; refusals and bad input above still answer now
-        if (def.long) return { job: viewOf(startJob(def, data, caller, options.name), render) };
+        if (def.long) return { job: ticketOf(startJob(def, data, caller, options.name)) };
         const out = execute(def, data, caller, { door: options.name });
         return isThenable(out) ? Promise.resolve(out).then((v) => render(def, v)) : render(def, out);
       },

@@ -169,10 +169,11 @@ if (!cmd || cmd === "--help" || cmd === "-h") {
     process.stderr.write(
       `${entry.name} runs as job ${id}; waiting for it (stopping this leaves it running: ${APP.slug} job.get --id ${id})\n`,
     );
-    let job = out.job;
-    while (job.state === "running") {
+    // the start's answer carries no result, so the job is read at least once
+    let job;
+    do {
       job = (await call(cfg, "POST", "/api/actions/job.get", { id })).result;
-    }
+    } while (job.state === "running");
     if (job.state === "failed")
       die(`${job.error?.code ?? "failed"}: ${job.error?.message ?? "the job failed"}`);
     print(job.result);
