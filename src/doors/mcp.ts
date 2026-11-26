@@ -11,7 +11,7 @@ import {
   JOB_WAIT_DEFAULT,
   type Registry,
 } from "../core.ts";
-import { errorShape } from "../errors.ts";
+import { ActionError, errorShape } from "../errors.ts";
 import { LONG_GUIDE } from "./files.ts";
 import { createGuard, type GuardOptions, maxBodyOf } from "./guard.ts";
 
@@ -336,7 +336,12 @@ export function mcp<R extends Registry<any, any, any, any, any>>(
         return { content: [{ type: "text", text: `${JSON.stringify({ job }, null, 2)}\n\n${next}` }] };
       }
       return { content: [{ type: "text", text: toolText(rendered) }] };
-    } catch (err) {
+    } catch (caught) {
+      // a tool the door's list rule hides answers as if it did not exist, so a guess learns nothing
+      const err =
+        caught instanceof ActionError && caught.code === "not_listed"
+          ? (reg as Registry).unknown(tool)
+          : caught;
       const shape = errorShape(err);
       if (!shape) console.error("oneset: an MCP tool call failed", err);
       // the issues an HTTP caller gets in its error body, as JSON after the one-line message

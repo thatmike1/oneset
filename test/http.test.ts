@@ -250,8 +250,20 @@ describe("errors with extras, callers and door options", () => {
       ...json({}),
       headers: { ...good, "content-type": "application/json" },
     });
-    assert.equal(res.status, 403);
-    assert.equal(res.json().error.code, "not_listed");
+    // the same answer as an action that does not exist, so the refusal does not confirm it does
+    const missing = await raw(app.port, {
+      path: "/api/actions/tape.nope",
+      ...json({}),
+      headers: { ...good, "content-type": "application/json" },
+    });
+    assert.equal(res.status, 404);
+    assert.deepEqual(res.json(), {
+      error: { code: "unknown_action", message: "no action named tape.secret" },
+    });
+    assert.equal(missing.status, 404);
+    assert.deepEqual(missing.json(), {
+      error: { code: "unknown_action", message: "no action named tape.nope" },
+    });
     assert.equal(reg.run("tape.secret", {}, { user: "mike" }), "secret");
   });
 

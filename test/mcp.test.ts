@@ -101,10 +101,13 @@ describe("the MCP door through the official SDK client", () => {
     );
   });
 
-  test("a direct call to an unlisted tool is refused", async () => {
-    const out = await client.callTool({ name: "note_fail", arguments: {} });
-    assert.equal(out.isError, true);
-    assert.equal(textOf(out), "not_listed: note.fail is not available through mcp");
+  test("a direct call to an unlisted tool answers exactly as an unknown one does", async () => {
+    const hidden = await client.callTool({ name: "note_fail", arguments: {} });
+    const unknown = await client.callTool({ name: "note_nope", arguments: {} });
+    assert.equal(hidden.isError, true);
+    assert.equal(textOf(hidden), "unknown_action: no action named note_fail");
+    // the same shape, word for word once the name is swapped: nothing says the action exists
+    assert.deepEqual(hidden, JSON.parse(JSON.stringify(unknown).replaceAll("note_nope", "note_fail")));
   });
 
   test("a failing handler is a tool error that says nothing of the inside", async () => {
@@ -819,7 +822,7 @@ describe("the MCP door mounted alone, with a caller the app resolved", () => {
       assert.equal(textOf(await client.callTool({ name: "library_overview", arguments: {} })), "3500 tracks");
       const hidden = await client.callTool({ name: "dj_ask", arguments: { message: "hi" } });
       assert.equal(hidden.isError, true);
-      assert.match(textOf(hidden), /^not_listed: /);
+      assert.equal(textOf(hidden), "unknown_action: no action named dj_ask");
     } finally {
       await client.close();
     }

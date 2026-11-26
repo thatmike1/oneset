@@ -216,7 +216,12 @@ export function doors<R extends Registry<any, any, any, any, any>>(
           const name = decodeAction(r.action ?? "");
           const input = await guard.readJson(req);
           const caller = await resolve(req, "http");
-          const result = await http.run(name, input, caller, { signal: left.signal });
+          // an action this door hides answers as an unknown one, the same 404, so a guess learns nothing
+          const result = await Promise.resolve()
+            .then(() => http.run(name, input, caller, { signal: left.signal }))
+            .catch((err: unknown) => {
+              throw err instanceof ActionError && err.code === "not_listed" ? registry.unknown(name) : err;
+            });
           // a long action's start: 202 Accepted with { job }, read with job.get
           if (http.starts(name)) sendJson(res, 202, result);
           else sendJson(res, 200, { result });
