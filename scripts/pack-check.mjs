@@ -12,18 +12,29 @@ try {
     .trim();
   const files = execFileSync("tar", ["-tzf", tarball]).toString().trim().split("\n").sort();
   const pkg = JSON.parse(execFileSync("tar", ["-xzOf", tarball, "package/package.json"]).toString());
-  const need = ["package/package.json", "package/dist/index.js", "package/dist/index.d.ts"];
+  const need = [
+    "package/package.json",
+    "package/LICENSE",
+    "package/README.md",
+    "package/dist/index.js",
+    "package/dist/index.d.ts",
+  ];
   for (const entry of Object.values(pkg.exports)) {
     if (typeof entry === "object") for (const p of Object.values(entry)) need.push(`package/${p.slice(2)}`);
   }
   const missing = need.filter((f) => !files.includes(f));
   const stray = files.filter(
-    (f) => !f.startsWith("package/dist/") && !/^package\/(package\.json|README\.md)$/.test(f),
+    (f) => !f.startsWith("package/dist/") && !/^package\/(package\.json|README\.md|LICENSE)$/.test(f),
   );
   if (missing.length || stray.length) {
     console.error(
       `pack check failed\n  missing: ${missing.join(", ") || "none"}\n  stray: ${stray.join(", ") || "none"}`,
     );
+    process.exit(1);
+  }
+  // a package marked private cannot be published, and one with no license is not open source
+  if (pkg.private || pkg.license !== "MIT") {
+    console.error(`pack check failed: private ${pkg.private ?? false}, license ${pkg.license ?? "none"}`);
     process.exit(1);
   }
   if (pkg.dependencies && Object.keys(pkg.dependencies).length) {

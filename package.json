@@ -1,9 +1,26 @@
 {
   "name": "oneset",
   "version": "0.1.0",
-  "private": true,
   "description": "Write an app's actions once; people use them through the page, agents through MCP or a CLI.",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "author": "Michal Pšenčík",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thatmike1/oneset.git"
+  },
+  "homepage": "https://github.com/thatmike1/oneset#readme",
+  "bugs": {
+    "url": "https://github.com/thatmike1/oneset/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agents",
+    "actions",
+    "cli",
+    "http",
+    "zod"
+  ],
   "type": "module",
   "engines": {
     "node": ">=22.18"
