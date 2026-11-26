@@ -1,5 +1,5 @@
 // a notes app: its actions written once, used by a person through the page and by their agent
-// through MCP or the CLI. Run it with `node examples/notes/server.mjs`, then open /setup
+// through MCP or the CLI. Save it as server.mjs, run `node server.mjs`, then open /setup
 import { createServer } from "node:http";
 import { createRegistry, defineAction } from "oneset";
 import { doors } from "oneset/doors";

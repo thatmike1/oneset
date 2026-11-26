@@ -2,15 +2,19 @@
 
 Agent access by default for a Node app. You write the app's actions once, and both the person (through the page) and their agent (through MCP or a CLI) use them. It mounts on the `node:http` server the app already has, and its only runtime requirement is `zod`, as a peer dependency.
 
-Private for now: not published to npm. Apps install it from a packed tarball (`pnpm pack`).
+## Quick start
 
-## The notes example
+You need Node 22.18 or newer. In an empty folder:
 
-A whole app: two actions, one mount, a small page. It lives in the repo as `examples/notes/server.mjs` (not in the package, so here it is in full; a test keeps the two the same).
+```sh
+pnpm add oneset zod
+```
+
+Save the file below as `server.mjs`. It is a whole app: two actions, one mount, a small page. (It also lives in this repo as `examples/notes/server.mjs`; a test keeps the two the same.)
 
 ```js
 // a notes app: its actions written once, used by a person through the page and by their agent
-// through MCP or the CLI. Run it with `node examples/notes/server.mjs`, then open /setup
+// through MCP or the CLI. Save it as server.mjs, run `node server.mjs`, then open /setup
 import { createServer } from "node:http";
 import { createRegistry, defineAction } from "oneset";
 import { doors } from "oneset/doors";
@@ -69,7 +73,31 @@ server.listen(Number(process.env.PORT ?? 3000), "127.0.0.1", () => {
 });
 ```
 
-From a checkout of this repo, run it with `pnpm build && node examples/notes/server.mjs`, then open `http://localhost:3000/setup` for the lines to paste. That one mount serves:
+Run it:
+
+```sh
+node server.mjs
+```
+
+Open `http://localhost:3000/` for the page and add a note. Then open `http://localhost:3000/setup`: it has the lines to paste once so an agent can use the same two actions, an MCP server for Claude Code or any other client, a CLI, and a Claude Code skill. For Claude Code that line is
+
+```sh
+claude mcp add --scope user --transport http notes http://localhost:3000/mcp
+```
+
+and after it a new Claude Code session can answer "what do my notes say?" with the `note_list` tool. To see the MCP door answer without any client, call a tool with `curl` (the door is stateless, so a call needs no session first):
+
+```sh
+curl -s http://localhost:3000/mcp \
+  -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"note_add","arguments":{"text":"buy milk"}}}'
+```
+
+It answers with the new note as the tool result's text, and the open page shows it without a reload. `PORT=4000 node server.mjs` moves it to another port.
+
+From a checkout of this repo, the same example runs with `pnpm install && pnpm build && node examples/notes/server.mjs`.
+
+## What one mount serves
 
 | Path | What |
 | --- | --- |
@@ -118,6 +146,14 @@ The contract:
 - `oneset/client` is the browser client from the package. Its `createClient({ url, fetch, EventSource })` makes a client a module can be handed, so code that node tests import can use it with a test server and an EventSource stand-in; the page itself still loads `/actions.js`. `onChange` listeners hear `{ action, door }` for a run of an action this caller may run, `{ changed: true }` for a run of one it may not (a read-only page still learns that shared data changed), `{ connected: true }` once the stream is live and `{ reconnected: true }` after a drop. A listener that keeps fetched state refetches on any of them; one that waits for a particular action refetches on that action and on anything without an `action`.
 - `mcp(reg, options)` from `oneset/doors` is the MCP door alone, `(req, res, caller, body?)`, for apps that keep their own routes and resolve their caller themselves. It keeps the same Host and Origin guard and takes the same `hosts`, `origins` and `maxBody`, so an app behind a proxy passes its public host in `hosts`. `handle.resolving(req, res, resolve, body?)` takes a function instead of a caller and calls it only once the request has passed the door's own checks, which is how `doors()` mounts it.
 
+## oneset, Agent-Native or Silkweave
+
+All three let you write an action once and reach it from more than one place. They differ in how much they bring.
+
+- **[Agent-Native](https://www.agent-native.com/)** (Builder.io) is a framework for building a whole app around an AI agent: an action there serves the UI, the agent inside the app, HTTP, MCP and the CLI. Pick it when you are starting an app whose own agent is the point and you want the framework to shape the rest of the app too.
+- **[Silkweave](https://www.silkweave.dev/)** is a TypeScript toolkit that exposes one set of actions as MCP servers (stdio and HTTP), a REST API with OpenAPI docs, tRPC and a CLI. Pick it when you need one of those oneset leaves out: stdio MCP, OpenAPI, tRPC or serverless deploys.
+- **oneset** is only the action layer, for a Node app that already has a `node:http` server and a page. It adds the page client and change stream, HTTP, MCP over streamable HTTP, a served CLI and skill, and a `/setup` page, with `zod` as its one peer dependency and no model or agent inside. Pick it when the app is yours already and you want its agent doors without adopting a framework.
+
 ## Tests
 
 ```sh
@@ -129,12 +165,9 @@ pnpm gate        # Biome check, typecheck, build, tests, pack check
 
 The suite covers the core against two fixtures (a notes app, and a Tandem-shaped app on `node:sqlite` with spaces, transactions, nested calls and proposals), an app-written door, the guard with and without a caller, the MCP door through the official SDK client and side by side with the SDK's own server, raw malformed MCP requests, the change stream read with `fetch`, the served CLI as a child process, the browser client, long actions through the core door, HTTP, the SDK client, the CLI, the browser client and the change stream, type tests compiled against the packed tarball, and the notes example answering over HTTP, MCP, the CLI and the browser client in one run.
 
-## Not done, or done differently from the plan
+## Choices worth knowing
 
-Everything in step 1 of the plan is built and tested. These are the places where the code does something the plan did not spell out or says differently:
-
-- **Unknown MCP tool.** Returned as a tool error, as the plan and the SDK do. The MCP spec (2025-11-25) lists an unknown tool as a protocol error (-32602). One line to flip.
-- **`kit` has two optional extra type parameters**, `Fields` (the app's own definition fields, so hooks can read them) and `ExtraInput` (fields a `schema` hook adds to every input, like Tandem's `space`).
-- **A door's `list` narrows what `allow` lets through**, rather than replacing it, as diskzokej's MCP door does today.
+- **Unknown MCP tool.** Returned as a tool error, as the official MCP SDK does. The MCP spec (2025-11-25) lists an unknown tool as a protocol error (-32602). A tool the door hides gets the same answer as one that does not exist.
+- **`kit` has two optional extra type parameters**, `Fields` (the app's own definition fields, so hooks can read them) and `ExtraInput` (fields a `schema` hook adds to every input, like a workspace `space` field every action takes).
+- **A door's `list` narrows what `allow` lets through**, rather than replacing it.
 - **The skill resolves the caller** like the API does, so for an app with sign-in it needs the key. The CLI, `/actions.js` and `/setup` are public files.
-- **The example is 58 lines**, not about 40: the two actions and the mount are about 40, and the rest is the small page that shows the browser client.
