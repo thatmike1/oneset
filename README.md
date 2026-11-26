@@ -1,6 +1,10 @@
 # oneset
 
-Agent access by default for a Node app. You write the app's actions once, and both the person (through the page) and their agent (through MCP or a CLI) use them. It mounts on the `node:http` server the app already has, and its only runtime requirement is `zod`, as a peer dependency.
+Write your Node app's actions once. The person uses them through the page, their agent through MCP or a CLI, and scripts through HTTP, all from one mount on the `node:http` server the app already has.
+
+One `defineAction` gives you a browser client with a live change stream, an HTTP API, an MCP server, a downloadable CLI, a Claude Code skill and a `/setup` page with the lines to paste. Each way in is called a door. There is no model, agent or framework inside, and `zod` is the only dependency, as a peer.
+
+Pick it when the app already exists and you want an agent to reach it without adopting a framework. Starting a new agent-first app, or need stdio MCP, OpenAPI or tRPC? See [oneset, Agent-Native or Silkweave](#oneset-agent-native-or-silkweave).
 
 ## Quick start
 
@@ -79,7 +83,7 @@ Run it:
 node server.mjs
 ```
 
-Open `http://localhost:3000/` for the page and add a note. Then open `http://localhost:3000/setup`: it has the lines to paste once so an agent can use the same two actions, an MCP server for Claude Code or any other client, a CLI, and a Claude Code skill. For Claude Code that line is
+Open `http://localhost:3000/` for the page and add a note. Then open `http://localhost:3000/setup`. It has the lines to paste once so an agent can use the same two actions: an MCP server (for Claude Code or any other client), a CLI, and a Claude Code skill. For Claude Code that line is
 
 ```sh
 claude mcp add --scope user --transport http notes http://localhost:3000/mcp
@@ -93,7 +97,7 @@ curl -s http://localhost:3000/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"note_add","arguments":{"text":"buy milk"}}}'
 ```
 
-It answers with the new note as the tool result's text, and the open page shows it without a reload. `PORT=4000 node server.mjs` moves it to another port.
+It answers with the new note as the tool result's text, and the open page shows it without a reload. `PORT=4000 node server.mjs` moves it to another port. When you are done, `claude mcp remove --scope user notes` takes the server out of Claude Code again.
 
 From a checkout of this repo, the same example runs with `pnpm install && pnpm build && node examples/notes/server.mjs`.
 
@@ -112,9 +116,11 @@ From a checkout of this repo, the same example runs with `pnpm install && pnpm b
 
 A `base` option moves them all under a prefix.
 
+In Express or another framework built on `node:http`, call it as middleware before any body parser: `app.use(async (req, res, next) => { if (!(await handle(req, res))) next(); })`.
+
 ## Long actions
 
-An action that takes longer than a client waits (uncharted's `look.roll` is 70 to 75 s; an MCP client gives up at about 60) is marked `long: true`. Every door then answers at once with a job, and the kit adds one action, `job.get` (MCP `job_get`), that reads it. Start it, then read it.
+An action that takes longer than a client waits (a model call or a render that runs 70 s, say; an MCP client gives up at about 60) is marked `long: true`. Every door then answers at once with a job, and oneset adds one action, `job.get` (MCP `job_get`), that reads it. Start it, then read it.
 
 ```js
 defineAction({ name: "look.roll", area: "looks", summary: "Roll six new looks", mutates: true, long: true, input, run });
@@ -132,19 +138,19 @@ The contract:
 - **The CLI** waits by default: it prints the job id to stderr, reads `job.get` until the job is done, then prints the result (or exits 1 with `code: message`). A shell call has no 60 s timeout, and a script wants the outcome and the exit code. `--no-wait`, where a flag goes, prints the job and returns; after a field it is that field's value (`--text --no-wait` sends the text "--no-wait"). An action field named `noWait` goes in through `--json '{"noWait":true}'`. `actions` and `help` mark long actions.
 - **The browser client's `act`** waits too and returns the result or throws the ActionError, so a page uses a long action like any other; `act(name, input, { wait: false })` returns the job for a long action and the result for any other, and its type says so.
 - **App code and nested runs** run inline: `reg.run` and a call from inside another action return the result (a promise), with no job. The job belongs to the door call; a nested job would detach the work from the outer action and hand its code a ticket it did not ask for. An app-written door from `reg.door` does start jobs; `door.starts(name)` says when.
-- **Guidance.** When any action is long (an app's own `job.get` with no long action gets none of this), the MCP `instructions` get a paragraph after the app's own, the served skill a "Long actions" section and `(long)` on the tool, and the CLI's `actions` and `help` say so. An app with a long action needs nothing else; an app with its own action named `job.get` (or `job_get`) is refused at `createRegistry`, since the kit's reader takes that name.
+- **Guidance.** When any action is long (an app's own `job.get` with no long action gets none of this), the MCP `instructions` get a paragraph after the app's own, the served skill a "Long actions" section and `(long)` on the tool, and the CLI's `actions` and `help` say so. An app with a long action needs nothing else; an app with its own action named `job.get` (or `job_get`) is refused at `createRegistry`, since oneset's reader takes that name.
 
 ## The pieces
 
-- **Naming actions in text.** Write the MCP spelling (`look_roll`) in `instructions` and anything else an agent reads: the MCP tools use it, the skill lists it for both, and the CLI takes it as well as the dotted name (`uncharted look_roll --for x`).
+- **Naming actions in text.** Write the MCP spelling (`look_roll`) in `instructions` and anything else an agent reads: the MCP tools use it, the skill lists it for both, and the CLI takes it as well as the dotted name (`myapp look_roll --for x`).
 - `kit<Caller, RunCtx, Fields?, ExtraInput?>()` returns a typed `defineAction` and `createRegistry`. The untyped ones are exported directly.
 - `createRegistry(definitions, hooks)` takes one list (a repeated name throws) and the hooks `schema(def)`, `allow(def, caller)`, `around(def, input, caller, next, info)`, `error(problem)` and, for long actions, `jobOwner(caller)` and the `jobs` settings. `allow` decides synchronously: an `allow` typed to return a promise does not compile (a `() => void` helper still does), and one that returns a promise at run time refuses every call, so resolve async facts in the caller resolver.
 - `reg.run(name, input, caller, info?)` runs allow, then validation against `schema(def)`, then `around`. A mutating run that succeeds sends a change event when it finishes; an `around` that rolls back and still returns normally (a dry run, `{ committed: false }`) calls `info.skipChange()` so none goes out. Throwing or rejecting suppresses it too, but turns the call into an error. `reg.onChange(fn)` hears each change as `fn(change)`; `reg.onChangeFrom(fn)` also passes `{ caller }`, whose run made it. The core never awaits: a sync chain returns a value, an async one a promise.
 - `reg.door({ name, list, describe, render, draft })` makes a door an app can use itself: `catalog(caller)` and `run(name, input, caller)`, which refuses what it does not list with `403 not_listed`. The HTTP and MCP doors that `doors()` and `mcp()` mount answer such a call exactly as they answer a name that does not exist (`404 unknown_action`, or the MCP tool error `unknown_action: no action named …`), so a caller cannot probe for hidden actions. `allow`'s own refusal still comes first and goes out as the app wrote it.
 - `ActionError(status, code, message, { issues, body, headers })` is the one error to throw. Doors render any thrown error by its `status`, `code`, `message` and `issues`.
-- `doors(reg, options)` takes the app's `name` and `version` (what MCP clients see; the version defaults to 1.0.0, so pass the app's own), `instructions` and `when`, and mounts everything behind the guard (foreign Host and Origin refused, JSON bodies only, bodies capped). `hosts` and `origins` widen it; a non-loopback host with no `caller` refuses to start unless `openWithoutSignIn: true`.
+- `doors(reg, options)` takes the app's `name` and `version` (what MCP clients see; the version defaults to 1.0.0, so pass the app's own), `instructions` and `when`, and mounts everything behind the guard (foreign Host and Origin refused, JSON bodies only, bodies capped). `hosts` and `origins` widen it; a non-loopback host with no `caller` refuses to start unless `openWithoutSignIn: true`. `caller(req, door)` is the sign-in: it returns whoever is calling (any value, a promise is fine) or throws an `ActionError` to refuse, with `headers` for a challenge. `door` is `"http"`, `"mcp"`, `"stream"` or `"skill"`. What it returns is the `caller` that `allow` and `around` receive, and the second argument of `run` unless `around` builds another context.
 - `oneset/client` is the browser client from the package. Its `createClient({ url, fetch, EventSource })` makes a client a module can be handed, so code that node tests import can use it with a test server and an EventSource stand-in; the page itself still loads `/actions.js`. `onChange` listeners hear `{ action, door }` for a run of an action this caller may run, `{ changed: true }` for a run of one it may not (a read-only page still learns that shared data changed), `{ connected: true }` once the stream is live and `{ reconnected: true }` after a drop. A listener that keeps fetched state refetches on any of them; one that waits for a particular action refetches on that action and on anything without an `action`.
-- `mcp(reg, options)` from `oneset/doors` is the MCP door alone, `(req, res, caller, body?)`, for apps that keep their own routes and resolve their caller themselves. It keeps the same Host and Origin guard and takes the same `hosts`, `origins` and `maxBody`, so an app behind a proxy passes its public host in `hosts`. `handle.resolving(req, res, resolve, body?)` takes a function instead of a caller and calls it only once the request has passed the door's own checks, which is how `doors()` mounts it.
+- `mcp(reg, options)` from `oneset/doors` is the MCP door alone, `(req, res, caller, body?)`, for apps that keep their own routes and resolve their caller themselves. It keeps the same Host and Origin guard and takes the same `hosts`, `origins` and `maxBody`, so an app behind a proxy passes its public host in `hosts`. The handler `mcp()` returns also has `.resolving(req, res, resolve, body?)`, which takes a function instead of a caller and calls it only once the request has passed the door's own checks, which is how `doors()` mounts it.
 
 ## oneset, Agent-Native or Silkweave
 
@@ -157,13 +163,12 @@ All three let you write an action once and reach it from more than one place. Th
 ## Tests
 
 ```sh
-export PATH="$HOME/.local/bin:$PATH"
 pnpm install
 pnpm test        # node:test, straight from the TypeScript source
 pnpm gate        # Biome check, typecheck, build, tests, pack check
 ```
 
-The suite covers the core against two fixtures (a notes app, and a Tandem-shaped app on `node:sqlite` with spaces, transactions, nested calls and proposals), an app-written door, the guard with and without a caller, the MCP door through the official SDK client and side by side with the SDK's own server, raw malformed MCP requests, the change stream read with `fetch`, the served CLI as a child process, the browser client, long actions through the core door, HTTP, the SDK client, the CLI, the browser client and the change stream, type tests compiled against the packed tarball, and the notes example answering over HTTP, MCP, the CLI and the browser client in one run.
+The suite covers the core against two fixtures (a notes app, and a multi-user workspace app on `node:sqlite` with spaces, transactions, nested calls and proposals), an app-written door, the guard with and without a caller, the MCP door through the official SDK client and side by side with the SDK's own server, raw malformed MCP requests, the change stream read with `fetch`, the served CLI as a child process, the browser client, long actions through the core door, HTTP, the SDK client, the CLI, the browser client and the change stream, type tests compiled against the packed tarball, and the notes example answering over HTTP, MCP, the CLI and the browser client in one run.
 
 ## Choices worth knowing
 
