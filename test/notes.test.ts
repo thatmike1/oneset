@@ -74,7 +74,7 @@ describe("running", () => {
         },
       }),
     ]);
-    const caller = { user: "mike" };
+    const caller = { user: "ada" };
     reg.run("x.who", {}, caller);
     assert.equal(ctxSeen, caller);
   });

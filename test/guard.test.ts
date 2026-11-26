@@ -26,7 +26,7 @@ for (const setup of setups) {
             ? {
                 caller: () => {
                   callerCalls++;
-                  return { user: "mike" };
+                  return { user: "ada" };
                 },
               }
             : {}),
@@ -164,7 +164,7 @@ describe("hosts and origins options", () => {
         name: "notes",
         hosts: ["notes.example.com"],
         origins: ["https://chatgpt.com"],
-        caller: () => ({ user: "mike" }),
+        caller: () => ({ user: "ada" }),
       }),
     );
   });
@@ -183,7 +183,7 @@ describe("hosts and origins options", () => {
       });
       assert.equal(same.status, 200, origin);
     }
-    for (const origin of ["https://mike@notes.example.com", "https://notes.example.com/app"]) {
+    for (const origin of ["https://ada@notes.example.com", "https://notes.example.com/app"]) {
       const odd = await raw(app.port, {
         path: "/api/actions",
         headers: { host: "notes.example.com", origin },

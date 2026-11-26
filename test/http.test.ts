@@ -179,7 +179,7 @@ describe("errors with extras, callers and door options", () => {
               headers: { "www-authenticate": 'Bearer realm="agents"' },
             });
           }
-          return auth === "Bearer good" ? { user: "mike", door } : undefined;
+          return auth === "Bearer good" ? { user: "ada", door } : undefined;
         },
         http: {
           list: (def) => def.name !== "tape.secret",
@@ -232,7 +232,7 @@ describe("errors with extras, callers and door options", () => {
       ...json({}),
       headers: { ...good, "content-type": "application/json" },
     });
-    assert.deepEqual(who.json(), { result: { user: "mike", door: "http" } });
+    assert.deepEqual(who.json(), { result: { user: "ada", door: "http" } });
   });
 
   test("render shapes the result", async () => {
@@ -264,7 +264,7 @@ describe("errors with extras, callers and door options", () => {
     assert.deepEqual(missing.json(), {
       error: { code: "unknown_action", message: "no action named tape.nope" },
     });
-    assert.equal(reg.run("tape.secret", {}, { user: "mike" }), "secret");
+    assert.equal(reg.run("tape.secret", {}, { user: "ada" }), "secret");
   });
 
   test("allow's error comes before the not-listed refusal", async () => {

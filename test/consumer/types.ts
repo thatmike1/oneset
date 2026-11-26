@@ -134,17 +134,17 @@ const reg = createRegistry([add, later, accept], {
   around: (_def, input, caller, next) => next(input, { actor: caller, space: "home" }),
 });
 
-const mike: Actor = { user: "mike" };
-reg.run("note.add", { text: "x" }, mike);
-reg.run("note.add", { text: "x", space: "work" }, mike);
-reg.run("note.later", { n: 1 }, mike, { nested: true, door: "mcp" });
+const ada: Actor = { user: "ada" };
+reg.run("note.add", { text: "x" }, ada);
+reg.run("note.add", { text: "x", space: "work" }, ada);
+reg.run("note.later", { n: 1 }, ada, { nested: true, door: "mcp" });
 
 // @ts-expect-error a wrong action name fails to compile
-reg.run("note.nope", { text: "x" }, mike);
+reg.run("note.nope", { text: "x" }, ada);
 // @ts-expect-error a wrong input field fails to compile
-reg.run("note.add", { txt: "x" }, mike);
+reg.run("note.add", { txt: "x" }, ada);
 // @ts-expect-error a wrong field type fails to compile
-reg.run("note.add", { text: 1 }, mike);
+reg.run("note.add", { text: 1 }, ada);
 // @ts-expect-error the caller is typed
 reg.run("note.add", { text: "x" }, { nobody: true });
 

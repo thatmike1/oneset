@@ -196,7 +196,7 @@ export function openDb(): DatabaseSync {
     create table proposals (id text primary key, space_id text not null, action text not null, input text not null,
       summary text not null, subject_type text not null, subject_id text not null);
     insert into spaces values ('s-home', 'home'), ('s-work', 'work');
-    insert into members values ('s-home', 'mike'), ('s-work', 'mike'), ('s-home', 'jindra');
+    insert into members values ('s-home', 'ada'), ('s-work', 'ada'), ('s-home', 'ben');
   `);
   return db;
 }

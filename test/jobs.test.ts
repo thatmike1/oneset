@@ -224,21 +224,15 @@ describe("a long action through a door", () => {
     });
     const page = reg.door({ name: "page" });
     const narrow = reg.door({ name: "narrow", list: (def) => def.name !== "look.roll" });
-    const mike = { user: "mike", rolls: true };
-    const { job } = page.run("look.roll", { for: "x" }, mike) as { job: JobView };
+    const ada = { user: "ada", rolls: true };
+    const { job } = page.run("look.roll", { for: "x" }, ada) as { job: JobView };
     const unknown = (err: unknown) =>
       err instanceof ActionError && err.code === "unknown_job" && err.status === 404;
-    assert.throws(
-      () => page.run("job.get", { id: job.id, wait: 0 }, { user: "gabca", rolls: true }),
-      unknown,
-    );
-    assert.throws(
-      () => page.run("job.get", { id: job.id, wait: 0 }, { user: "mike", rolls: false }),
-      unknown,
-    );
-    assert.throws(() => narrow.run("job.get", { id: job.id, wait: 0 }, mike), unknown);
-    assert.throws(() => page.run("job.get", { id: "no-such-job", wait: 0 }, mike), unknown);
-    assert.equal(((await page.run("job.get", { id: job.id }, mike)) as JobView).state, "done");
+    assert.throws(() => page.run("job.get", { id: job.id, wait: 0 }, { user: "cleo", rolls: true }), unknown);
+    assert.throws(() => page.run("job.get", { id: job.id, wait: 0 }, { user: "ada", rolls: false }), unknown);
+    assert.throws(() => narrow.run("job.get", { id: job.id, wait: 0 }, ada), unknown);
+    assert.throws(() => page.run("job.get", { id: "no-such-job", wait: 0 }, ada), unknown);
+    assert.equal(((await page.run("job.get", { id: job.id }, ada)) as JobView).state, "done");
   });
 
   test("finished jobs are kept for keepMs and at most max of them; running ones stay", async () => {
@@ -834,8 +828,8 @@ describe("long actions, after review", () => {
       rolls: boolean;
     }
     const users: Record<string, Who> = {
-      "Bearer mike": { user: "mike", rolls: true },
-      "Bearer gabca": { user: "gabca", rolls: true },
+      "Bearer ada": { user: "ada", rolls: true },
+      "Bearer cleo": { user: "cleo", rolls: true },
       "Bearer guest": { user: "guest", rolls: false },
     };
     const caller = (req: { headers: { authorization?: string } }) => {
@@ -861,8 +855,8 @@ describe("long actions, after review", () => {
     const owned = createRegistry(looksApp({ ms: 20 }).actions, { allow, jobOwner: (who: Who) => who.user });
     const app = await serve(doors(owned, { name: "owned", caller }));
     try {
-      const streams = await Promise.all(["mike", "gabca", "guest"].map((u) => watch(app.url, u)));
-      const { id } = (await start(app.port, "mike")).json().job as JobView;
+      const streams = await Promise.all(["ada", "cleo", "guest"].map((u) => watch(app.url, u)));
+      const { id } = (await start(app.port, "ada")).json().job as JobView;
       const heard = await Promise.all(streams.map((s) => s.next(1000)));
       assert.deepEqual(
         heard.map((e) => (e ? JSON.parse(e.data) : null)),
@@ -881,11 +875,11 @@ describe("long actions, after review", () => {
     const unowned = createRegistry(looksApp({ ms: 20 }).actions, { allow });
     const app2 = await serve(doors(unowned, { name: "unowned", caller }));
     try {
-      const mike = await watch(app2.url, "mike");
-      await start(app2.port, "mike");
-      const event = await mike.next(1000);
+      const ada = await watch(app2.url, "ada");
+      await start(app2.port, "ada");
+      const event = await ada.next(1000);
       assert.deepEqual(JSON.parse(event?.data ?? "null"), { action: "look.roll", door: "http" });
-      mike.close();
+      ada.close();
     } finally {
       await app2.close();
     }

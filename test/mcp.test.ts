@@ -698,7 +698,7 @@ describe("raw malformed requests", () => {
               headers: { "www-authenticate": 'Bearer realm="agents"' },
             });
           }
-          return { user: "mike" };
+          return { user: "ada" };
         },
       }),
     );
@@ -883,7 +883,7 @@ describe("the MCP door mounted alone keeps the guard", () => {
 
   for (const [label, caller] of [
     ["without a caller", undefined],
-    ["with a caller", { user: "mike" }],
+    ["with a caller", { user: "ada" }],
   ] as const) {
     test(`a foreign Host or Origin is refused before anything runs, ${label}`, async () => {
       const app = await alone({}, caller);
@@ -917,7 +917,7 @@ describe("the MCP door mounted alone keeps the guard", () => {
   test("hosts and origins widen it, as they do for doors()", async () => {
     const app = await alone(
       { hosts: ["notes.example.com"], origins: ["https://chatgpt.com"] },
-      { user: "mike" },
+      { user: "ada" },
     );
     try {
       assert.equal(

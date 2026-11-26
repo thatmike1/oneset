@@ -132,7 +132,7 @@ describe("the CLI with an agent key", () => {
           if (req.headers.authorization !== "Bearer sekret") {
             throw new ActionError(401, "no_key", "send your agent key as a bearer token");
           }
-          return { user: "mike" };
+          return { user: "ada" };
         },
       }),
     );
@@ -148,12 +148,12 @@ describe("the CLI with an agent key", () => {
     const right = await cli(file, ["login", app.url, "sekret"]);
     assert.equal(right.code, 0, right.stderr);
     const list = await cli(file, ["item.list"]);
-    assert.deepEqual(JSON.parse(list.stdout), ["mike's item"]);
+    assert.deepEqual(JSON.parse(list.stdout), ["ada's item"]);
   });
 
   test("the key also comes from the env", async () => {
     const out = await cli(file, ["item.list"], { KEYED_KEY: "sekret", XDG_CONFIG_HOME: join(dir, "empty") });
-    assert.deepEqual(JSON.parse(out.stdout), ["mike's item"]);
+    assert.deepEqual(JSON.parse(out.stdout), ["ada's item"]);
   });
 
   test("the setup page and the skill line ask for a key", async () => {

@@ -94,18 +94,18 @@ describe("the change stream on the notes app", () => {
 });
 
 describe("the change stream on the Tandem-shaped app", () => {
-  const mike: Actor = { user: "mike", agent: null };
+  const ada: Actor = { user: "ada", agent: null };
   const app = tandem(openDb());
   let served: Served;
   before(async () => {
-    served = await serve(doors(app.reg, { name: "tandem", caller: () => mike }));
+    served = await serve(doors(app.reg, { name: "tandem", caller: () => ada }));
   });
   after(() => served.close());
 
   test("one event for a run with nested calls, none for a rolled-back one", async () => {
     const events = await openEvents(`${served.url}/api/actions/stream`);
     try {
-      assert.throws(() => app.reg.run("item.pair", { title: "x", fail: true }, mike));
+      assert.throws(() => app.reg.run("item.pair", { title: "x", fail: true }, ada));
       const res = await raw(served.port, { path: "/api/actions/item.pair", ...json({ title: "twin" }) });
       assert.deepEqual(res.json(), { result: { status: "done", result: { ids: [1, 2] } } });
       assert.deepEqual(JSON.parse((await events.next())?.data ?? "null"), {
