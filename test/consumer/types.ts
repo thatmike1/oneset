@@ -148,6 +148,13 @@ reg.run("note.add", { text: 1 }, ada);
 // @ts-expect-error the caller is typed
 reg.run("note.add", { text: "x" }, { nobody: true });
 
+// a change made outside a run names whose it was when the caller is typed, since onChangeFrom
+// listeners are promised a caller of that type
+reg.changed({ action: "note.add" }, { caller: ada });
+// @ts-expect-error a registry with a typed caller needs the change's caller
+reg.changed({ action: "note.add" });
+reg.onChangeFrom((_change, { caller }) => expectType<Equal<typeof caller, Actor>>());
+
 // with no around, run returns the handler's own output, sync or async as written
 const plain = createRegistry([add, later]);
 expectType<Equal<ReturnType<typeof plain.run<"note.add">>, { id: number; text: string; by: string }>>();

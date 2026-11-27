@@ -240,9 +240,14 @@ export interface Registry<
    * path), so listeners and the change stream hear it as they hear a run's. `action` names the
    * mutating action whose effect it was, when the app knows it; without one, listeners hear
    * `{ action: "", door }` and every stream subscriber a bare `{ changed: true }`. `door` defaults
-   * to `"outside"`; `caller`, whose change it was, goes to onChangeFrom listeners and `hears`
+   * to `"outside"`; `caller`, whose change it was, goes to onChangeFrom listeners and `hears`, so
+   * a registry with a typed caller must name one (they are promised a caller of that type); one
+   * whose caller may be undefined can leave it out
    */
-  changed(change?: { action?: string; door?: string }, from?: Partial<ChangeSource<Caller>>): void;
+  changed(
+    change?: { action?: string; door?: string },
+    ...from: undefined extends Caller ? [from?: Partial<ChangeSource<Caller>>] : [from: ChangeSource<Caller>]
+  ): void;
 }
 
 /** what a client needs: every action's input and its awaited output, by name */
@@ -703,7 +708,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
         listeners.delete(fn);
       };
     },
-    changed(change = {}, from = {}) {
+    changed(change = {}, ...[from]: [Partial<ChangeSource>?]) {
       const action = change.action ?? "";
       if (action) {
         const def = byName.get(action);
@@ -712,7 +717,7 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
           throw new Error(`oneset: changed() names ${action}, which changes nothing`);
         }
       }
-      emit({ action, door: change.door ?? "outside" }, from.caller);
+      emit({ action, door: change.door ?? "outside" }, from?.caller);
     },
   };
 }
