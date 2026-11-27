@@ -311,3 +311,41 @@ describe("the change stream for a signed-in app", () => {
     }
   });
 });
+
+describe("a change announced from outside a run", () => {
+  const reg = notesRegistry();
+  let app: Served;
+  before(async () => {
+    app = await serve(doors(reg, { name: "notes" }));
+  });
+  after(() => app.close());
+
+  test("reaches the stream named, or bare without an action", async () => {
+    const events = await openEvents(`${app.url}/api/actions/stream`);
+    try {
+      reg.changed({ action: "note.add" });
+      assert.deepEqual(JSON.parse((await events.next())?.data ?? "null"), {
+        action: "note.add",
+        door: "outside",
+      });
+      reg.changed({ door: "sync" });
+      assert.deepEqual(JSON.parse((await events.next())?.data ?? "null"), { changed: true });
+    } finally {
+      events.close();
+    }
+  });
+
+  test("listeners hear it with the caller, and a wrong name throws", () => {
+    const heard: unknown[] = [];
+    const off = reg.onChangeFrom((change, from) => heard.push([change, from.caller]));
+    reg.changed({ action: "note.add", door: "phone" }, { caller: "ana" });
+    reg.changed();
+    off();
+    assert.deepEqual(heard, [
+      [{ action: "note.add", door: "phone" }, "ana"],
+      [{ action: "", door: "outside" }, undefined],
+    ]);
+    assert.throws(() => reg.changed({ action: "note.nope" }), /note\.nope/);
+    assert.throws(() => reg.changed({ action: "note.list" }), /changes nothing/);
+  });
+});

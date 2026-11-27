@@ -184,8 +184,12 @@ export interface ChangeSource<Caller = any> {
   caller: Caller;
 }
 
-/** what change listeners hear after a mutating run succeeds at the outermost level */
+/**
+ * what change listeners hear after a mutating run succeeds at the outermost level, or when the
+ * app announces one with `changed()`
+ */
 export interface Change {
+  /** the action that made it; empty for a change announced without one */
   action: string;
   door: string;
   /** the job's id, when the run was a long action's job: the change comes when it finishes */
@@ -231,6 +235,14 @@ export interface Registry<
   onChange(listener: (change: Change) => unknown): () => void;
   /** the same, with a second argument saying whose run made the change, for scoping who hears it */
   onChangeFrom(listener: (change: Change, from: ChangeSource<Caller>) => unknown): () => void;
+  /**
+   * announces a change made outside a run (another process wrote the store, the app's own sync
+   * path), so listeners and the change stream hear it as they hear a run's. `action` names the
+   * mutating action whose effect it was, when the app knows it; without one, listeners hear
+   * `{ action: "", door }` and every stream subscriber a bare `{ changed: true }`. `door` defaults
+   * to `"outside"`; `caller`, whose change it was, goes to onChangeFrom listeners and `hears`
+   */
+  changed(change?: { action?: string; door?: string }, from?: Partial<ChangeSource<Caller>>): void;
 }
 
 /** what a client needs: every action's input and its awaited output, by name */
@@ -690,6 +702,17 @@ export function buildRegistry(definitions: readonly AnyAction[], hooks: Hooks = 
       return () => {
         listeners.delete(fn);
       };
+    },
+    changed(change = {}, from = {}) {
+      const action = change.action ?? "";
+      if (action) {
+        const def = byName.get(action);
+        if (!def) throw problem({ kind: "unknown_action", name: action });
+        if (!def.mutates || isJobDef(def)) {
+          throw new Error(`oneset: changed() names ${action}, which changes nothing`);
+        }
+      }
+      emit({ action, door: change.door ?? "outside" }, from.caller);
     },
   };
 }
