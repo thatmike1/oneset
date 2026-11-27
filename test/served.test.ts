@@ -315,6 +315,31 @@ describe("the browser client", () => {
 });
 
 describe("the browser client from the package", () => {
+  test("createClient sends its headers with every request, so a server can call an app with a key", async () => {
+    const reg = notesRegistry();
+    const app = await serve(
+      doors(reg, {
+        name: "notes",
+        caller: (req) => {
+          if (req.headers.authorization === "Bearer a-key") return "agent";
+          throw new ActionError(401, "login", "sign in first");
+        },
+      }),
+    );
+    const { createClient } = await import("../src/doors/browser.js");
+    try {
+      const client = createClient({ url: app.url, headers: { authorization: "Bearer a-key" } });
+      assert.deepEqual(await client.act("note.add", { text: "with a key" }), { id: 1, text: "with a key" });
+      assert.ok((await client.actions()).some((a) => a.name === "note.add"));
+      await assert.rejects(createClient({ url: app.url }).act("note.list"), (err: unknown) => {
+        assert.equal((err as { status: number }).status, 401);
+        return true;
+      });
+    } finally {
+      await app.close();
+    }
+  });
+
   test("createClient takes the address, fetch and EventSource, so a tested module can use it", async () => {
     const reg = notesRegistry();
     const app = await serve(doors(reg, { name: "notes", base: "/kit" }));

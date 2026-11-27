@@ -39,6 +39,11 @@ export interface ClientOptions {
     status: number;
     json(): Promise<any>;
   }>;
+  /**
+   * headers sent with every action and catalog request, e.g. `{ authorization: "Bearer …" }` for
+   * a server calling another app with a key. Not on the change stream: EventSource sends none
+   */
+  headers?: Record<string, string>;
   /** default the global EventSource */
   EventSource?: new (
     url: string,

@@ -4,8 +4,8 @@
 //   import { act, onChange } from "/actions.js";
 //   onChange(() => refresh());
 //   await act("note.add", { text: "milk" });
-// `createClient({ url, fetch, EventSource })` makes another one, for a module that node tests
-// import or a page that talks to an app at another address.
+// `createClient({ url, fetch, EventSource, headers })` makes another one, for a module that node
+// tests import, a page that talks to an app at another address, or a server calling an app with a key.
 
 // oneset:settings
 const SETTINGS = { url: "" };
@@ -31,12 +31,16 @@ export function createClient(options = {}) {
   const root = (options.url ?? ROOT).replace(/\/$/, "");
   const doFetch = options.fetch ?? ((...args) => globalThis.fetch(...args));
   const Source = options.EventSource;
+  // headers sent with every action and catalog request, such as a key for a server calling
+  // another app; EventSource cannot send headers, so the change stream goes without them
+  const extraHeaders = options.headers ?? {};
 
   async function request(method, path, body) {
     const res = await doFetch(`${root}${path}`, {
       method,
       credentials: "same-origin",
-      headers: body === undefined ? {} : { "content-type": "application/json" },
+      headers:
+        body === undefined ? { ...extraHeaders } : { ...extraHeaders, "content-type": "application/json" },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
